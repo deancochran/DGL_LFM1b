@@ -1,3 +1,4 @@
+import argparse
 import os
 import torch as th
 from dgl import heterograph
@@ -240,3 +241,13 @@ class LFM1b(DGLDataset):
     def __len__(self):
         return 1
   
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--name', default='LFM-1b', type=str, help='name of directory in data folder')
+    parser.add_argument('--nrows', default=None, type=str, help="number of LE rows rto collect for a subset of the full dataset")
+    parser.add_argument('--device', default='cpu', type=int, help='torch device to use for categorical encoding of ids')
+    args = parser.parse_args()
+    
+    LFM1b(name=args.name, nrows=args.nrows, device=args.device)
