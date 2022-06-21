@@ -106,11 +106,8 @@ ENV/
 .mypy_cache/
 
 # data
-data/raw/*
-data/preprocessed/*
-data/processed/*
+data/LFM-1b/*
 .vscode/
-data/.DS_Store
 *.pkl
 *.txt
 *.csv
