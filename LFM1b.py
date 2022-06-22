@@ -17,11 +17,10 @@ class LFM1b(DGLDataset):
     def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, n_users=None, device='cpu'):
         self.root_dir = 'data/'+name
         self.preprocessed_dir = 'data/'+name+'/preprocessed'
+        self.raw_ugp_dir='data/'+name+f'/{name}_UGP'
+        self.lfm1b_ugp_url='http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip'
         self.n_users=n_users
         self.device=device
-
-        self.lfm1b_ugp_url='http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip'
-        self.raw_ugp_dir='data/'+name+f'/{name}_UGP'
         super().__init__(
             name=name, 
             url='http://drive.jku.at/ssf/s/readFile/share/1056/266403063659030189/publicLink/LFM-1b.zip', 
@@ -301,7 +300,7 @@ class LFM1b(DGLDataset):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--name', default='LFM-1b', type=str, help='name of directory in data folder')
+    parser.add_argument('--name', default='DGL_LFM1b', type=str, help='name of directory in data folder')
     parser.add_argument('--n_users', default=None, type=str, help="number of LE rows rto collect for a subset of the full dataset")
     parser.add_argument('--device', default='cpu', type=str, help='torch device to use for categorical encoding of ids')
     args = parser.parse_args()

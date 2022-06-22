@@ -106,7 +106,7 @@ ENV/
 .mypy_cache/
 
 # data
-data/LFM-1b/*
+data/*
 .vscode/
 *.pkl
 *.txt
