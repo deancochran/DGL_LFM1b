@@ -1,14 +1,14 @@
 import torch as th
-# from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer
 
-# class SequenceEncoder(object):
-#     '''Converts a list of unique string values into a PyTorch tensor`'''
-#     def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
-#         self.device = device
-#         self.model = SentenceTransformer(model_name, device=device)
-#     @th.no_grad()
-#     def __call__(self, list):
-#         return self.model.encode(list, show_progress_bar=True,convert_to_tensor=True, device=self.device)
+class SequenceEncoder(object):
+    '''Converts a list of unique string values into a PyTorch tensor`'''
+    def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
+        self.device = device
+        self.model = SentenceTransformer(model_name, device=device)
+    @th.no_grad()
+    def __call__(self, list):
+        return self.model.encode(list, show_progress_bar=True,convert_to_tensor=True, device=self.device)
 
 class CategoricalEncoder(object):
     '''Converts a list of string categorical values into a PyTorch tensor`'''

@@ -253,7 +253,11 @@ def get_raw_ids(file_path, type, return_unique_ids=False, id_list=None):
                     chunk=chunk[~chunk[col].isin(bad_vals)].copy()
                     chunk[col]=[setType(x,col) for x in chunk[col]]
                     chunk[col]=chunk[col].astype(getType(col)).copy()
-        for id_col in id_list: # for every column we want to return
+        if return_unique_ids:
+            for id_col in id_list: # for every column we want to return
+                ids_dict[id_col]+=list(chunk[id_col].unique()) # set unique values of the column 
+        else:
+            for id_col in id_list: # for every column we want to return
                 ids_dict[id_col]+=list(chunk[id_col].values) # set unique values of the column 
             
     if return_unique_ids: 
@@ -322,7 +326,7 @@ def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_pl
     (dict)- a dictionry of ids with the column names specified in the id_list as keys
     '''
     type_id = type+'_id'
-    # print(f'loading {type} playcounts for every user')
+    print(f'loading {type} playcounts for every user')
     chunksize=10000000
     df_chunks = pd.read_csv(file_path, names=get_col_names('le'), sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
     size = get_fileSize(file_path) # get size of file
@@ -346,7 +350,7 @@ def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_pl
                     total_user_plays[user_id]+=1
             except:
                 pass    
-
+    
     if relative_playcount:
         return [user_id for user_id, groupby_id in playcount_dict.keys()], [groupby_id for user_id, groupby_id in playcount_dict.keys()], [val/total_user_plays[u_id] for (u_id,g_id), val in playcount_dict.items()]
     else:
@@ -368,8 +372,8 @@ def remap_ids(col_dict, ordered_cols, mappings):
     (dict)- a dictionry of the remapped items
     '''
     new_mapping={col_name:list() for col_name in col_dict.keys()}
-    # print('remapping ids')
     length=len(col_dict[ordered_cols[0]])
+    skipped=0
     for row_index in tqdm(range(length), total=length):
         bad_row=False
         for mapping, col_name in zip(mappings,ordered_cols):
@@ -378,12 +382,14 @@ def remap_ids(col_dict, ordered_cols, mappings):
                 new_mapping[col_name].append(mapping[val])
             except:
                 bad_row=True
-                # print('found bad id while mapping')
         if bad_row ==False:
             for col_name in col_dict.keys():
                 if col_name not in ordered_cols:
                     val=col_dict[col_name][row_index]
                     new_mapping[col_name].append(val)
+        else:
+            skipped+=1
+    print(f'remapped {col_dict.keys()} skipped {skipped} bad ids')
     return new_mapping
 
 
@@ -404,6 +410,7 @@ def get_artist_genre_df(artist_genres_allmusic_path, artist_name_to_id_mapping):
     file=open(artist_genres_allmusic_path, 'r')
     lines=file.readlines()
     data={'artist_id':list(),'genre_id':list()}
+    
     for line in lines:
         info=line.strip().split('\t')
         name=str(info[0])
@@ -489,8 +496,7 @@ def get_user_info(user_info, u_id, country_percs, gender_percs):
 def preprocess_raw(raw_path, preprocessed_path, n_users=None):
     ''' 
     Description:
-
-    The fucniton works in two ways....
+    The preprocess_raw fucniton works in two ways....
 
     1) When called by the process method inside the LFM1b DGLDataset class to pre process 
     and save all the listening events, users, artists, slbums, and tracks such that
@@ -506,8 +512,7 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
     Parameters:
     raw_path (str) - the string path to the raw LFM1b directory holding the contents of the LFM1b.zip file
     preprocessed_path (str) - the string path to the preprocessed LFM1b directory where new txt files will be stored
-    n_users (int) - an integer to specify the number of users to collect for a specified subset
-
+    n_users (int) - an integer to specify the number of users to collect for a specified subsets
     '''
     
     les_raw_path=raw_path+'/LFM-1b_LEs.txt'
@@ -591,6 +596,7 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
             'mean':15962,
             'std':8879
         }            
+        
         required_country_count={k:round(int(float(v/100)*float(n_users))) for k,v in required_country_count.items()}
         size=sum(required_country_count.values())
         if size > n_users:
@@ -616,15 +622,12 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
                 required_valid_age_count[rand_key]+=1
                 size=sum(required_valid_age_count.values())
 
-
         user_info = get_raw_ids(users_raw_path, type='user', id_list=['user_id', 'country', 'age', 'gender', 'playcount'])
         user_info_ids=user_info['user_id'].copy()
         
         user_id_collection=[]
         pbar = tqdm(total=n_users)
-        ids_start=len(user_info_ids)
         ids_left=len(user_info_ids)
-
         while len(user_id_collection)<n_users and ids_left > 0:
             ids_left=len(user_info_ids)
             random_index = random.choice(range(ids_left))  
