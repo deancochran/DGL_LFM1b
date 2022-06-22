@@ -1,4 +1,4 @@
-# lfm1b-dgl-hetero
+# DGL_LFM1bs
 This repository is a custom DGL datatset created from the LFM-1b database. 
 The database downloads and processes the full database to create one singular DGL heterogeneous graph.
 
