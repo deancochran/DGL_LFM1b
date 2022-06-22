@@ -10,18 +10,18 @@ The node types of the graph:
 - Genre (20)
 
 The Edge types of the graph :
-- User -> Artsit (na)
-- Artsit -> User (na)
+- User -> Artsit (61411336)
+- Artsit -> User (61411336)
 - User -> Album (na)
 - Album -> User (na)
 - User -> Track (na)
 - Track -> User (na)
-- Artsit -> Genre (na)
-- Genre -> Artsit (na)
-- Album -> Artsit (na)
-- Artsit -> Album (na)
-- Track -> Artsit (na)
-- Artsit -> Track (na)
+- Artsit -> Genre (414379)
+- Genre -> Artsit (414379)
+- Album -> Artsit (14184326)
+- Artsit -> Album (14184326)
+- Track -> Artsit (27258365)
+- Artsit -> Track (27258365)
 
 
 Additionally, for all the user edges:
@@ -92,7 +92,7 @@ To run the code, simply 'cd' into the root of the repository and run:
 ### Precurser warning: 
 
 I the author of the repository and using a Linux Machine with 30GB of RAM and 12GB of GPU. 
-To run the above script I will take myself ~2hrs.
+To run the above script I will take myself ~2hrs, and I am unable to store the full knowledge graph in memory
 
 
 ## Make a subset of the file

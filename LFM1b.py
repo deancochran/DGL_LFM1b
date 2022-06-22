@@ -9,10 +9,10 @@ from encoders import CategoricalEncoder, IdentityEncoder
 
 
 class LFM1b(DGLDataset):
-    def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, nrows=None, device='cpu'):
+    def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, n_users=None, device='cpu'):
         self.root_dir = 'data/'+name
         self.preprocessed_dir = 'data/'+name+'/preprocessed'
-        self.nrows=nrows
+        self.n_users=n_users
         self.device=device
 
         self.lfm1b_ugp_url='http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip'
@@ -54,7 +54,7 @@ class LFM1b(DGLDataset):
     def process(self):
         processed_condition = os.path.exists(os.path.join(self.save_dir+'/'+'lastfm1b.bin')) == False
         if processed_condition == True:
-            preprocess_raw(self.raw_dir,self.preprocessed_dir, nrows=self.nrows)
+            preprocess_raw(self.raw_dir,self.preprocessed_dir, n_users=self.n_users)
             graph_data = {}
             edge_data_features = {}
             node_data_features = {}
@@ -246,8 +246,8 @@ class LFM1b(DGLDataset):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--name', default='LFM-1b', type=str, help='name of directory in data folder')
-    parser.add_argument('--nrows', default=None, type=str, help="number of LE rows rto collect for a subset of the full dataset")
-    parser.add_argument('--device', default='cpu', type=int, help='torch device to use for categorical encoding of ids')
+    parser.add_argument('--n_users', default=None, type=str, help="number of LE rows rto collect for a subset of the full dataset")
+    parser.add_argument('--device', default='cpu', type=str, help='torch device to use for categorical encoding of ids')
     args = parser.parse_args()
     
-    LFM1b(name=args.name, nrows=args.nrows, device=args.device)
+    LFM1b(name=args.name, n_users=args.n_users, device=args.device)
