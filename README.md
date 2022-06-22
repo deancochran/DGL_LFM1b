@@ -95,7 +95,7 @@ To create a subset of the LFM1b database, simply 'cd' into the root of the repos
 
 # The DGL Framework
 
-The Deep Graph library ([DGL]((https://www.dgl.ai/))) framework provides the ability to utilize the DGLDataset object
+The Deep Graph library ( [DGL]((https://www.dgl.ai/)) )  framework provides the ability to utilize the DGLDataset object
 to generate a customizeable dataset for the purpose of node/link/graph down stream tasks.
 
 Once the dataset is compiled you may import the class into any file and load the precompiled graph for DGL based analysis.
