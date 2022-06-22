@@ -57,7 +57,6 @@ for ICMR and is directly available through the [website](http://www.cp.jku.at/da
 
 In case you make use of the LFM-1b dataset in your own research, please cite the following paper:
 
-
     The LFM-1b Dataset for Music Retrieval and Recommendation
     Schedl, M.
     Proceedings of the ACM International Conference on Multimedia Retrieval (ICMR 2016), New York, USA, April 2016.
@@ -74,6 +73,25 @@ In case you make use of the LFM-1b UGP dataset in your own research, please cite
     Schedl, M. and Ferwerda, B.
     Proceedings of the 19th IEEE International Symposium on Multimedia (ISM 2017), Taichung, Taiwan, December 2017.
 
+# Compile the dataset
+
+To compile the LFM1b database, simply 'cd' into the root of the repository and run:
+
+    python LFM1b.py
+
+### **Precurser warning**: 
+
+I, the author of the repository, am using a Linux Machine with 30GB of RAM and 12GB of GPU.  To run the above script, it will take the machine ~2hrs, and I am unable to store the full knowledge graph in memory
+
+
+## Compile a subset
+
+To create a subset of the LFM1b database, simply 'cd' into the root of the repository and run:
+
+    python LFM1b.py --n_users 50
+
+`This provides a subset of 50 users with their correspoing listen events, and the artists/albums/tracks associated with their listening habits`
+
 
 # The DGL Framework
 
@@ -82,18 +100,14 @@ to generate a customizeable dataset for the purpose of node/link/graph down stre
 
 Once the dataset is compiled you may import the class into any file and load the precompiled graph for DGL based analysis.
 
+    from LFM1b import LFM1b 
+    dataset = LFM1b()
+    glist, glabels = dataset.load()
+    hg=glist[0]
 
-# Run the code
-
-To run the code, simply 'cd' into the root of the repository and run:
-
-    python LFM1b.py
-
-### Precurser warning: 
-
-I the author of the repository and using a Linux Machine with 30GB of RAM and 12GB of GPU. 
-To run the above script I will take myself ~2hrs, and I am unable to store the full knowledge graph in memory
+    print(hg)
 
 
-## Make a subset of the file
+
+
 
