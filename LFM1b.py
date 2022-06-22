@@ -81,23 +81,23 @@ class LFM1b(DGLDataset):
                     df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
                     mappings['artist_name_mapping'] = {artist_name: int(artist_id)  for artist_id, artist_name in zip(df['artist_id'],df['artist_name'])}
                     # -------------------------ARTIST NODE FEATURES-------------------------
-                    node_data_features['artist'] = {'feat': seq_encoder(df['artist_name'])}
+                    node_data_features['artist']={'feat': cat_encoder(df['artist_id'])}
                     del df
 
                 elif filename=='genres_allmusic.txt':
-                    df = get_preprocessed_ids(file_path,type='genre' ,id_list=['genre_id'])
+                    df = get_preprocessed_ids(file_path,type='genre' ,id_list=['genre_id','genre_name'])
                     # -------------------------GENRE NODE FEATURES-------------------------
-                    node_data_features['genre'] = {'feat': cat_encoder(df['genre_id'])}
+                    node_data_features['genre']={'feat': cat_encoder(df['genre_id'])}
                     del df
 
                     artist_genres_path=self.raw_ugp_dir+'/LFM-1b_artist_genres_allmusic.txt'
                     df = get_artist_genre_df(artist_genres_path, mappings['artist_name_mapping'])
                     # -------------------------ARTIST->GENRE EDGES-------------------------
                     graph_data[('artist', 'in_genre', 'genre')]=(th.tensor(df['artist_id'].values), th.tensor(df['genre_id'].values))
-                    edge_data_features['in_genre']={'norm_playcount': id_encoder([1 for id in df['genre_id']])}
+                    edge_data_features['in_genre']={'norm_connections': id_encoder([1 for id in df['genre_id']])}
                     # -------------------------GENRE->ARTIST EDGES-------------------------
                     graph_data[('genre', 'is_genre_of', 'artist')]=(th.tensor(df['genre_id'].values), th.tensor(df['artist_id'].values))
-                    edge_data_features['is_genre_of']={'norm_playcount': id_encoder([1 for id in df['genre_id']])}
+                    edge_data_features['is_genre_of']={'norm_connections': id_encoder([1 for id in df['genre_id']])}
 
                     del df
                     del mappings['artist_name_mapping']
@@ -110,14 +110,13 @@ class LFM1b(DGLDataset):
                     df=remap_ids(df, ordered_cols=['album_id'], mappings=[mappings['album_mapping']])
                     
                     # -------------------------ALBUM NODE FEATURES-------------------------
-                    # node_data_features['album'] = {'feat': cat_encoder(df['album_id'])}
-                    node_data_features['album'] = {'feat': seq_encoder(df['album_name'])}
+                    node_data_features['album']={'feat': cat_encoder(df['album_id'])}
                     # -------------------------ALBUM->ARTIST EDGES-------------------------
                     graph_data[('album', 'produced_by', 'artist')]=(th.tensor(df['album_id']), th.tensor(df['artist_id']))
-                    edge_data_features['produced_by']={'norm_playcount': id_encoder([1 for id in df['album_id']])}
+                    edge_data_features['produced_by']={'norm_connections': id_encoder([1 for id in df['album_id']])}
                     # -------------------------ARTIST->ALBUM EDGES-------------------------
                     graph_data[('artist', 'produced', 'album')]=(th.tensor(df['artist_id']), th.tensor(df['album_id']))
-                    edge_data_features['produced']={'norm_playcount': id_encoder([1 for id in df['album_id']])}
+                    edge_data_features['produced']={'norm_connections': id_encoder([1 for id in df['album_id']])}
                     del df
 
                 elif filename=='LFM-1b_tracks.txt':
@@ -128,22 +127,23 @@ class LFM1b(DGLDataset):
                     df=remap_ids(df, ordered_cols=['track_id'], mappings=[mappings['track_mapping']])
                     
                     # -------------------------TRACK NODE FEATURES-------------------------
-                    node_data_features['track'] = {'feat': seq_encoder(df['track_name'])}
+                    node_data_features['track']={'feat': cat_encoder(df['track_id'])}
                     # -------------------------TRACK->ARTIST EDGES-------------------------
                     graph_data[('track', 'preformed_by', 'artist')]=(th.tensor(df['track_id']), th.tensor(df['artist_id']))
-                    edge_data_features['preformed_by']={'norm_playcount': id_encoder([1 for id in df['track_id']])}
+                    edge_data_features['preformed_by']={'norm_connections': id_encoder([1 for id in df['track_id']])}
                     # -------------------------ARTIST->TRACK EDGES-------------------------
                     graph_data[('artist', 'preformed', 'track')]=(th.tensor(df['artist_id']), th.tensor(df['track_id']))
-                    edge_data_features['preformed']={'norm_playcount': id_encoder([1 for id in df['track_id']])}
+                    edge_data_features['preformed']={'norm_connections': id_encoder([1 for id in df['track_id']])}
                     del df
 
                 elif filename=='LFM-1b_users.txt':
                     # -------------------------USER ID RE-MAPPING-------------------------
-                    df = get_preprocessed_ids(file_path, type='user', id_list=['user_id','playcount'])
+                    df = get_preprocessed_ids(file_path, type='user', id_list=['user_id','country','age','gender','playcount'])
                     mappings['user_mapping']= {int(id): i for i, id in enumerate(df['user_id'])}
                     df=remap_ids(df, ordered_cols=['user_id'], mappings=[mappings['user_mapping']])
                     # -------------------------USER NODE FEATURES-------------------------
-                    node_data_features['user'] = {'feat': cat_encoder(df['user_id'])}
+                    node_data_features['user']={'feat': cat_encoder(df['user_id'])}
+                    
                     del df
 
                 elif filename=='LFM-1b_LEs.txt':
@@ -158,13 +158,13 @@ class LFM1b(DGLDataset):
                         th.tensor(user_id_list), 
                         th.tensor(groupby_id_list)
                         )
-                    edge_data_features['listened_to_artist']={'norm_playcount': id_encoder(playcounts)}
+                    edge_data_features['listened_to_artist']={'norm_connections': id_encoder(playcounts)}
 
                     graph_data[('artist', 'artist_listened_by', 'user')]=(
                         th.tensor(groupby_id_list), 
                         th.tensor(user_id_list)
                         )
-                    edge_data_features['artist_listened_by']={'norm_playcount': id_encoder(playcounts)}
+                    edge_data_features['artist_listened_by']={'norm_connections': id_encoder(playcounts)}
                     del mappings['artist_mapping']
                     del user_id_list
                     del groupby_id_list
@@ -181,13 +181,13 @@ class LFM1b(DGLDataset):
                         th.tensor(user_id_list), 
                         th.tensor(groupby_id_list)
                         )
-                    edge_data_features['listened_to_album']={'norm_playcount': id_encoder(playcounts)}
+                    edge_data_features['listened_to_album']={'norm_connections': id_encoder(playcounts)}
 
                     graph_data[('album', 'album_listened_by', 'user')]=(
                         th.tensor(groupby_id_list), 
                         th.tensor(user_id_list)
                         )
-                    edge_data_features['album_listened_by']={'norm_playcount': id_encoder(playcounts)}
+                    edge_data_features['album_listened_by']={'norm_connections': id_encoder(playcounts)}
                     del mappings['album_mapping']
                     del user_id_list
                     del groupby_id_list
@@ -204,13 +204,13 @@ class LFM1b(DGLDataset):
                         th.tensor(user_id_list), 
                         th.tensor(groupby_id_list)
                         )
-                    edge_data_features['listened_to_track']={'norm_playcount': id_encoder(playcounts)}
+                    edge_data_features['listened_to_track']={'norm_connections': id_encoder(playcounts)}
 
                     graph_data[('track', 'track_listened_by', 'user')]=(
                         th.tensor(groupby_id_list), 
                         th.tensor(user_id_list)
                         )
-                    edge_data_features['track_listened_by']={'norm_playcount': id_encoder(playcounts)}
+                    edge_data_features['track_listened_by']={'norm_connections': id_encoder(playcounts)}
                     del mappings['track_mapping']
                     del user_id_list
                     del groupby_id_list
@@ -239,7 +239,7 @@ class LFM1b(DGLDataset):
             for node in node_data_features.keys():
                 for feature in node_data_features[node].keys():
                     feature_data = node_data_features[node][feature]
-                    print(f'assigning feature of shape {feature_data.shape} to {node}')
+                    print(f'assigning {feature} of shape {feature_data.shape} to {node}')
                     self.graph.nodes[node].data[feature] = feature_data
             del node_data_features
 

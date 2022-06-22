@@ -70,8 +70,8 @@ Additionally, for all the user edges:
 - User -> Track 
 - Track -> User
 
-There is 'norm_weight' edge data indicating the normalized realtive interaction a user had with a specified target artist, album, track. 
-The 'norm_weight' edge data for all other edges is represented as a 1 
+There is 'norm_connections' edge data indicating the normalized realtive interaction count a src node had with a specified dst artist, album, track node. 
+The 'norm_connections' edge data for all other edges is represented as a 1 
 
 # Compile the dataset
 
