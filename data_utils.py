@@ -326,7 +326,7 @@ def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_pl
     (dict)- a dictionry of ids with the column names specified in the id_list as keys
     '''
     type_id = type+'_id'
-    print(f'loading {type} playcounts for every user')
+    # print(f'loading {type} playcounts for every user')
     chunksize=10000000
     df_chunks = pd.read_csv(file_path, names=get_col_names('le'), sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
     size = get_fileSize(file_path) # get size of file
@@ -389,7 +389,7 @@ def remap_ids(col_dict, ordered_cols, mappings):
                     new_mapping[col_name].append(val)
         else:
             skipped+=1
-    print(f'remapped {col_dict.keys()} skipped {skipped} bad ids')
+    # print(f'remapped {col_dict.keys()} skipped {skipped} bad ids')
     return new_mapping
 
 
@@ -463,7 +463,7 @@ def filterLEs(input_path, type, output_path, bad_ids, cols_to_filter, load_raw=T
                         if isValid(x,col) ==False:
                             bad_vals.append(x)
                     bad_vals=np.unique(bad_vals)
-                    print('chunk bad vals',bad_vals)
+                    # print('chunk bad vals',bad_vals)
                     chunk=chunk[~chunk[col].isin(bad_vals)].copy()
                     chunk[col]=[setType(x,col) for x in chunk[col]]
                     chunk[col]=chunk[col].astype(getType(col)).copy()
