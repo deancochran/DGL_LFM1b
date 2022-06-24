@@ -307,8 +307,29 @@ def get_preprocessed_ids(file_path, type, return_unique_ids=False, id_list=None)
     else:
         return ids_dict
 
-global verifyIds_count
-verifyIds_count=0
+def get_les(file_path, type, user_mapping, groupby_mapping):
+    type_id = type+'_id'
+    print(f'loading {type} listen events for every user')
+    chunksize=10000000
+    df_chunks = pd.read_csv(file_path, names=get_col_names('le'), sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
+    size = get_fileSize(file_path) # get size of file
+    user_ids=[]
+    groupby_ids=[]
+    timestamps=[]
+    for chunk in tqdm(df_chunks, total=size//chunksize): # load tqdm progress 
+        for col in chunk: 
+            chunk[col]=chunk[col].astype(getType(col)).copy() 
+        for user_id, groupby_id, timestamp in zip(chunk['user_id'].values, chunk[type_id].values, chunk['timestamp'].values): 
+            try:
+                user_id=user_mapping[user_id]
+                groupby_id=groupby_mapping[groupby_id]
+                user_ids.append(user_id)
+                groupby_ids.append(groupby_id)
+                timestamps.append(int(timestamp))
+            except:
+                pass    
+    
+    return zip(*sorted(zip(timestamps,user_ids,groupby_ids)))
 
 def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_playcount=False):
     '''
@@ -326,7 +347,7 @@ def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_pl
     (dict)- a dictionry of ids with the column names specified in the id_list as keys
     '''
     type_id = type+'_id'
-    # print(f'loading {type} playcounts for every user')
+    print(f'loading {type} playcounts for every user')
     chunksize=10000000
     df_chunks = pd.read_csv(file_path, names=get_col_names('le'), sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
     size = get_fileSize(file_path) # get size of file
@@ -352,9 +373,9 @@ def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_pl
                 pass    
     
     if relative_playcount:
-        return [user_id for user_id, groupby_id in playcount_dict.keys()], [groupby_id for user_id, groupby_id in playcount_dict.keys()], [val/total_user_plays[u_id] for (u_id,g_id), val in playcount_dict.items()]
+        return [val/total_user_plays[u_id] for (u_id,g_id), val in playcount_dict.items()], [user_id for user_id, groupby_id in playcount_dict.keys()], [groupby_id for user_id, groupby_id in playcount_dict.keys()]
     else:
-        return [user_id for user_id, groupby_id in playcount_dict.keys()], [groupby_id for user_id, groupby_id in playcount_dict.keys()], [val for (u_id,g_id), val in playcount_dict.items()]
+        return [val for (u_id,g_id), val in playcount_dict.items()], [user_id for user_id, groupby_id in playcount_dict.keys()], [groupby_id for user_id, groupby_id in playcount_dict.keys()]
 
 
 def remap_ids(col_dict, ordered_cols, mappings):
@@ -493,7 +514,7 @@ def get_user_info(user_info, u_id, country_percs, gender_percs):
     return u_id_country, u_id_age, u_id_gender, u_id_playcount
 
 
-def preprocess_raw(raw_path, preprocessed_path, n_users=None):
+def preprocess_raw(raw_path, preprocessed_path, n_users=None, overwrite=False):
     ''' 
     Description:
     The preprocess_raw fucniton works in two ways....
@@ -526,9 +547,9 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
     albums_pre_path=preprocessed_path+'/LFM-1b_albums.txt'
     tracks_pre_path=preprocessed_path+'/LFM-1b_tracks.txt'
     users_pre_path=preprocessed_path+'/LFM-1b_users.txt'
+    genres_pre_path=preprocessed_path+'/genres_allmusic.txt'
 
-    condition= os.path.exists(preprocessed_path+'/LFM-1b_LEs.txt') == False
-    if condition == True and n_users==None:
+    if n_users==None:
         print(f'making subset of all users')
 
         unique_le_ids = get_raw_ids(les_raw_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
@@ -543,6 +564,13 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         total_bad_artist_ids = np.unique(get_bad_ids(artist_id_dict['artist_id'], [album_id_dict['artist_id'],track_id_dict['artist_id'], unique_le_ids['artist_id']], type='artist')+bad_artist_name_ids)
         total_bad_album_ids = np.unique(get_bad_ids(album_id_dict['album_id'], [unique_le_ids['album_id']], type='album')+bad_album_name_ids)
         total_bad_track_ids = np.unique(get_bad_ids(track_id_dict['track_id'], [unique_le_ids['track_id']], type='track')+bad_track_name_ids)
+        if overwrite:
+            os.remove(les_pre_path)
+            os.remove(artists_pre_path)
+            os.remove(albums_pre_path)
+            os.remove(tracks_pre_path)
+            os.remove(users_pre_path)
+            os.remove(genres_pre_path)
         filterLEs(les_raw_path, type='le', output_path=les_pre_path, bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'])
         unique_le_ids = get_preprocessed_ids(les_pre_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
         
@@ -555,7 +583,7 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         df = pd.read_csv(file_path, names=['genre_name'])
         df['genre_id']=df['genre_name'].index
         df=df.reindex(columns=['genre_id', 'genre_name'])
-        output_path=preprocessed_path+'/genres_allmusic.txt'
+        output_path=genres_pre_path
         df.to_csv(output_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
 
         del df
@@ -604,9 +632,20 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
                 rand_key = random.choice([k for k,v in required_country_count.items()])  
                 required_country_count[rand_key]-=1
                 size=sum(required_country_count.values())
+        if size < n_users:
+            while size != n_users:
+                rand_key = random.choice([k for k,v in required_country_count.items()])  
+                required_country_count[rand_key]+=1
+                size=sum(required_country_count.values())
+
 
         required_gender_count={k:round(int(float(v/100)*float(n_users))) for k,v in required_gender_count.items()}
         size=sum(required_gender_count.values())
+        if size > n_users:
+            while size != n_users:
+                rand_key = random.choice([k for k,v in required_gender_count.items()])  
+                required_gender_count[rand_key]-=1
+                size=sum(required_gender_count.values())
         if size < n_users:
             while size != n_users:
                 rand_key = random.choice([k for k,v in required_gender_count.items()])  
@@ -616,15 +655,24 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         
         required_valid_age_count={k:round(int(float(v/100)*float(n_users))) for k,v in required_valid_age_count.items()}
         size=sum(required_valid_age_count.values())
+        if size > n_users:
+            while size != n_users:
+                rand_key = random.choice([k for k,v in required_valid_age_count.items()])  
+                required_valid_age_count[rand_key]-=1
+                size=sum(required_valid_age_count.values())
         if size < n_users:
             while size != n_users:
                 rand_key = random.choice([k for k,v in required_valid_age_count.items()])  
                 required_valid_age_count[rand_key]+=1
                 size=sum(required_valid_age_count.values())
 
+        print("required_country_count",required_country_count)
+        print("required_gender_count",required_gender_count)
+        print("required_valid_age_count",required_valid_age_count)
+
         user_info = get_raw_ids(users_raw_path, type='user', id_list=['user_id', 'country', 'age', 'gender', 'playcount'])
         user_info_ids=user_info['user_id'].copy()
-        
+        print('making subset of users')
         user_id_collection=[]
         pbar = tqdm(total=n_users)
         ids_left=len(user_info_ids)
@@ -674,6 +722,13 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         total_bad_artist_ids = np.unique(get_bad_ids(artist_id_dict['artist_id'], [album_id_dict['artist_id'],track_id_dict['artist_id'], unique_le_ids['artist_id']], type='artist')+bad_artist_name_ids)
         total_bad_album_ids = np.unique(get_bad_ids(album_id_dict['album_id'], [unique_le_ids['album_id']], type='album')+bad_album_name_ids)
         total_bad_track_ids = np.unique(get_bad_ids(track_id_dict['track_id'], [unique_le_ids['track_id']], type='track')+bad_track_name_ids)
+        if overwrite:
+            os.remove(les_pre_path)
+            os.remove(artists_pre_path)
+            os.remove(albums_pre_path)
+            os.remove(tracks_pre_path)
+            os.remove(users_pre_path)
+            os.remove(genres_pre_path)
         filterLEs(les_raw_path, type='le', output_path=les_pre_path, bad_ids=[total_bad_user_ids,total_bad_album_ids,total_bad_track_ids,total_bad_artist_ids], cols_to_filter=['user_id','track_id','album_id','artist_id'])
         unique_le_ids = get_preprocessed_ids(les_pre_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
         
@@ -686,7 +741,7 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         df = pd.read_csv(file_path, names=['genre_name'])
         df['genre_id']=df['genre_name'].index
         df=df.reindex(columns=['genre_id', 'genre_name'])
-        output_path=preprocessed_path+'/genres_allmusic.txt'
+        output_path=genres_pre_path
         df.to_csv(output_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
 
         del df
