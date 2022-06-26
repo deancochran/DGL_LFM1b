@@ -1,21 +1,20 @@
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
 
+from enum import unique
+import warnings
 import os
 import argparse
-import torch as th
-
 from dgl import heterograph
 from dgl.data import DGLDataset, download, extract_archive
 from dgl.data.utils import save_graphs, load_graphs
-from .data_utils import get_artist_genre_df, get_le_playcount, get_les, get_preprocessed_ids, remap_ids, preprocess_raw, get_fileSize
-from .encoders import CategoricalEncoder, IdentityEncoder, SequenceEncoder
+from torch_sparse import transpose
+from torch_geometric.nn import MetaPath2Vec
+from .data_utils import *
+from .meta_paths import *
+warnings.filterwarnings("ignore", category=FutureWarning)
+th.cuda.empty_cache()
 
 class LFM1b(DGLDataset):
     def __init__(self, 
-    hash_key=(), 
-    force_reload=False, 
-    verbose=False, 
     n_users=None, 
     device='cpu', 
     overwrite_preprocessed=False, 
@@ -23,7 +22,18 @@ class LFM1b(DGLDataset):
     artists=True,
     albums=True,
     tracks=True,
-    playcount_weight=False
+    playcount_weight=False,
+    norm_playcount_weight=True,
+    metapath2vec=False,
+    emb_dim=128,
+    walk_length=64,
+    context_size=7,
+    walks_per_node=3,
+    num_negative_samples=5,
+    batch_size=128,
+    learning_rate=0.01,
+    epochs=5,
+    logs=100
     ):
         name='DGL_LFM1b'
         self.root_dir = './data/'+name
@@ -37,15 +47,26 @@ class LFM1b(DGLDataset):
         self.artists=artists
         self.albums=albums
         self.tracks=tracks
+        self.emb_dim=emb_dim
         self.playcount_weight=playcount_weight
+        self.norm_playcount_weight=norm_playcount_weight
+        self.walk_length=walk_length
+        self.context_size=context_size
+        self.walks_per_node=walks_per_node
+        self.num_negative_samples=num_negative_samples
+        self.batch_size=batch_size
+        self.learning_rate=learning_rate
+        self.epochs=epochs
+        self.logs=logs
+        self.metapath2vec=metapath2vec
         super().__init__(
             name=name, 
             url='http://drive.jku.at/ssf/s/readFile/share/1056/266403063659030189/publicLink/LFM-1b.zip', 
             raw_dir=self.root_dir+'/'+name, 
             save_dir=self.root_dir+'/processed',
-            hash_key=hash_key, 
-            force_reload=force_reload, 
-            verbose=verbose
+            hash_key=(), 
+            force_reload=False, 
+            verbose=False
             ) 
 
     def download(self):
@@ -77,67 +98,96 @@ class LFM1b(DGLDataset):
             print('saved!')
 
     def process(self):
-        if os.path.exists(self.save_dir+'/lastfm1b.bin') == True and self.overwrite_processed == True:
+        print('\n','Processing LFM1b')
+        if os.path.exists(self.save_dir+'/lastfm1b.bin') == True and (self.overwrite_processed == True or self.overwrite_processed== True):
             os.remove(self.save_dir+'/lastfm1b.bin')
         processed_condition = os.path.exists(os.path.join(self.save_dir+'/lastfm1b.bin')) == False
         if processed_condition == True:
-            preprocessed_condition = os.path.exists(os.path.join(self.preprocessed_dir+'/LFM-1b_LEs.txt')) == False or self.overwrite_preprocessed == True
-            if preprocessed_condition == True:
-                preprocess_raw(self.raw_dir,self.preprocessed_dir, n_users=self.n_users, overwrite=self.overwrite_preprocessed)
-            
+            preprocessed_files_dont_exist = os.path.exists(os.path.join(self.preprocessed_dir+'/LFM-1b_LEs.txt')) == False or os.path.exists(os.path.join(self.preprocessed_dir+'/LFM-1b_albums.txt')) == False or os.path.exists(os.path.join(self.preprocessed_dir+'/LFM-1b_artists.txt')) == False or os.path.exists(os.path.join(self.preprocessed_dir+'/LFM-1b_tracks.txt')) == False or os.path.exists(os.path.join(self.preprocessed_dir+'/LFM-1b_users.txt')) == False
+            if preprocessed_files_dont_exist == True or self.overwrite_preprocessed == True:
+                preprocess_raw(self.raw_dir,self.preprocessed_dir, n_users=self.n_users)
+                
+                
             graph_data = {}
+            num_nodes_dict = {}
             mappings={} 
             device = th.device(self.device)
-            id_encoder = IdentityEncoder(device=device) # used to encode floats f(x)==2, where x = 2 
-            # bin_encoder = BinaryEncoder(device=device)
-            cat_encoder = CategoricalEncoder(device=device) # used to encode categories f(x)==[0,0,1,0], where x = 2, of possible types 0,1,2,3
-            seq_encoder = SequenceEncoder(device=device) # used to encode strs f(x)==[0.213,0.254,...,134,.893], where x = 'dean', and shape is (1x254)
+            id_encoder = IdentityEncoder(device='cpu') # used to encode floats f(x)==2, where x = 2 
+            # bin_encoder = BinaryEncoder(device='cpu')
+            # cat_encoder = CategoricalEncoder(device='cpu') # used to encode categories f(x)==[0,0,1,0], where x = 2, of possible types 0,1,2,3
+            # seq_encoder = SequenceEncoder(device='cpu') # used to encode strs f(x)==[0.213,0.254,...,134,.893], where x = 'dean', and shape is (1x254)
             
             
             # -------------------------USER MAPPING-------------------------
             file_path=self.preprocessed_dir+'/'+'LFM-1b_users.txt'
-            print('\t','------------------- Loading Mapping Data from',file_path.split('_')[-1],'-------------------')
+            print('\t','Loading Mapping Data from',file_path.split('_')[-1])
             df = get_preprocessed_ids(file_path, type='user', id_list=['user_id'])
             mappings['user_mapping']= {int(id): i for i, id in enumerate(df['user_id'])}
-
-            # -------------------------ARTIST MAPPING -------------------------
-            file_path=self.preprocessed_dir+'/'+'LFM-1b_artists.txt'
-            print('\t','------------------- Loading Mapping Data from',file_path.split('_')[-1],'-------------------')
-            df = get_preprocessed_ids(file_path, type='artist', id_list=['artist_id','artist_name'])
-            mappings['artist_mapping'] = {int(id): i for i, id in enumerate(df['artist_id'])}
-            df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
-            mappings['artist_name_mapping'] = {artist_name: int(artist_id)  for artist_id, artist_name in zip(df['artist_id'],df['artist_name'])}
+            num_nodes_dict['user']=len(mappings['user_mapping'].values())
             del df
 
-            # -------------------------ALBUM MAPPING -------------------------
-            file_path=self.preprocessed_dir+'/'+'LFM-1b_albums.txt'
-            print('\t','------------------- Loading Mapping Data from',file_path.split('_')[-1],'-------------------')
-            df = get_preprocessed_ids(file_path, type='album', id_list=['album_id','artist_id'])
-            df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
-            mappings['album_mapping'] = {int(id): i for i, id in enumerate(df['album_id'])}
-            del df
+            if self.artists==True:
+                # -------------------------GENRE MAPPING-------------------------
+                file_path=self.preprocessed_dir+'/'+'genres_allmusic.txt'
+                print('\t','Loading Mapping Data from',file_path.split('_')[-1])
+                df = get_preprocessed_ids(file_path,type='genre' ,id_list=['genre_id','genre_name'])
+                num_nodes_dict['genre']=len(df['genre_id'])
+                del df
 
-            # -------------------------TRACK MAPPING -------------------------
-            file_path=self.preprocessed_dir+'/'+'LFM-1b_tracks.txt'
-            print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
-            df = get_preprocessed_ids(file_path, type='track', id_list=['track_id', 'artist_id'])
-            df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
-            mappings['track_mapping'] = {int(id): i for i, id in enumerate(df['track_id'])}
-            del df
+                # -------------------------ARTIST MAPPING -------------------------
+                file_path=self.preprocessed_dir+'/'+'LFM-1b_artists.txt'
+                print('\t','Loading Mapping Data from',file_path.split('_')[-1])
+                df = get_preprocessed_ids(file_path, type='artist', id_list=['artist_id','artist_name'])
+                mappings['artist_name_mapping'] = {artist_name: int(artist_id)  for artist_id, artist_name in zip(df['artist_id'],df['artist_name'])}
+                mappings['artist_mapping'] = {int(id): i for i, id in enumerate(df['artist_id'])}
+                df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                num_nodes_dict['artist']=len(mappings['artist_mapping'].values())
+                # print('size of artist mapping', len(mappings['artist_mapping'].values()))
+                # print('max artist mapping', max(mappings['artist_mapping'].values()))
+                # print('unique artists size', len(unique_artists))
+                del df
+
+
+            if self.albums==True:
+                # -------------------------ALBUM MAPPING -------------------------
+                file_path=self.preprocessed_dir+'/'+'LFM-1b_albums.txt'
+                print('\t','Loading Mapping Data from',file_path.split('_')[-1])
+                df = get_preprocessed_ids(file_path, type='album', id_list=['album_id','artist_id'])
+                df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                mappings['album_mapping'] = {int(id): i for i, id in enumerate(df['album_id'])}
+                num_nodes_dict['album']=len(mappings['album_mapping'].values())
+                # unique_artists=  set(unique_artists).union(np.unique(df['artist_id']))
+                # print('unique artists size', len(unique_artists))
+                del df
+
+
+            if self.tracks==True:
+                # -------------------------TRACK MAPPING -------------------------
+                file_path=self.preprocessed_dir+'/'+'LFM-1b_tracks.txt'
+                print('\t','Loading Mapping Data from',file_path.split('_')[-1])
+                df = get_preprocessed_ids(file_path, type='track', id_list=['track_id', 'artist_id'])
+                df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                mappings['track_mapping'] = {int(id): i for i, id in enumerate(df['track_id'])}
+                num_nodes_dict['track']=len(mappings['track_mapping'].values())
+                # unique_artists=  set(unique_artists).union(np.unique(df['artist_id']))
+                # print('unique artists size', len(unique_artists))
+                del df
 
             if self.artists==True:
                 # -------------------------GENRES->ARTISTS GRAPH DATA-------------------------
                 file_path=self.raw_ugp_dir+'/LFM-1b_artist_genres_allmusic.txt'
-                print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
-                df = get_artist_genre_df(file_path, mappings['artist_name_mapping'])
-                graph_data[('artist', 'in_genre', 'genre')]=(th.tensor(df['artist_id'].values), th.tensor(df['genre_id'].values))
-                graph_data[('genre', 'is_genre_of', 'artist')]=(th.tensor(df['genre_id'].values), th.tensor(df['artist_id'].values))
+                print('\t','Loading Graph Data from',file_path.split('_')[-1])
+                df = get_artist_genre_df(file_path, mappings['artist_name_mapping'], mappings['artist_mapping'], self.preprocessed_dir)
+                graph_data[('artist', 'in_genre', 'genre')]=(th.tensor(df['artist_id']), th.tensor(df['genre_id']))
+                graph_data[('genre', 'is_genre_of', 'artist')]=(th.tensor(df['genre_id']), th.tensor(df['artist_id']))
+                # unique_artists=  set(unique_artists).union(np.unique(df['artist_id']))
+                # print('unique artists size', len(unique_artists))
                 del df
 
                 if self.albums==True:
                     # -------------------------ALBUMS->ARTISTS GRAPH DATA-------------------------
                     file_path=self.preprocessed_dir+'/'+'LFM-1b_albums.txt'
-                    print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
+                    print('\t','Loading Graph Data from',file_path.split('_')[-1])
                     df = get_preprocessed_ids(file_path, type='album', id_list=['album_id','artist_id'])
                     df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
                     df=remap_ids(df, ordered_cols=['album_id'], mappings=[mappings['album_mapping']])
@@ -148,7 +198,7 @@ class LFM1b(DGLDataset):
                 if self.tracks==True:
                     # -------------------------TRACKS->ARTISTS GRAPH DATA-------------------------
                     file_path=self.preprocessed_dir+'/'+'LFM-1b_tracks.txt'
-                    print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
+                    # print('\t','Loading Graph Data from',file_path.split('_')[-1])
                     df = get_preprocessed_ids(file_path, type='track', id_list=['track_id', 'artist_id'])
                     df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
                     df=remap_ids(df, ordered_cols=['track_id'], mappings=[mappings['track_mapping']])
@@ -158,7 +208,7 @@ class LFM1b(DGLDataset):
 
                 # -------------------------USER->ARTISTS GRAPH DATA-------------------------
                 file_path=self.preprocessed_dir+'/'+'LFM-1b_LEs.txt'
-                print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
+                # print('\t','Loading Graph Data from',file_path.split('_')[-1])
                 if self.playcount_weight:
                     playcounts, user_id_list, groupby_id_list=get_le_playcount(
                         file_path,type='artist',
@@ -182,6 +232,8 @@ class LFM1b(DGLDataset):
                         th.tensor(groupby_id_list), 
                         th.tensor(user_id_list)
                         )
+                # unique_artists=  set(unique_artists).union(np.unique(groupby_id_list))
+                # print('unique artists size', len(unique_artists))
                 del user_id_list
                 del groupby_id_list
                 
@@ -189,7 +241,7 @@ class LFM1b(DGLDataset):
             if self.albums==True:
                 # -------------------------USER->ALBUMS GRAPH DATA-------------------------
                 file_path=self.preprocessed_dir+'/'+'LFM-1b_LEs.txt'
-                print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
+                # print('\t','Loading Graph Data from',file_path.split('_')[-1])
                 if self.playcount_weight:
                     playcounts, user_id_list, groupby_id_list=get_le_playcount(
                         file_path,type='album',
@@ -219,7 +271,7 @@ class LFM1b(DGLDataset):
             if self.tracks==True:
                 # -------------------------USER->TRACKS GRAPH DATA-------------------------
                 file_path=self.preprocessed_dir+'/'+'LFM-1b_LEs.txt'
-                print('\t','------------------- Loading Graph Data from',file_path.split('_')[-1],'-------------------')
+                print('\t','Loading Graph Data from',file_path.split('_')[-1])
                 if self.playcount_weight:
                     playcounts, user_id_list, groupby_id_list=get_le_playcount(
                         file_path,type='track',
@@ -248,67 +300,123 @@ class LFM1b(DGLDataset):
                 
 
             # -------------------------DGL HETERO GRAPH OBJECT-------------------------
-            print('\t','-------------------  Creating DGL HeteroGraph from Graph Data  -------------------')
-            self.graph = heterograph(graph_data)
+            print('\t','Creating DGL HeteroGraph from Graph Data')
+            self.graph = heterograph(graph_data,num_nodes_dict)
             print(self.graph)
             del graph_data
 
+
+            # ------------------------- METAPATH2VEC NODE EMBEDDING ENCODER -------------------------
+            if self.metapath2vec==True:
+                print('\t','Creating metapath2vec node embeddings')
+                metapath=get_metapath(num_nodes_dict)
+                print('using metapath',metapath)
+                metapath2vec_model = MetaPath2Vec(
+                    {(s,e,d):th.stack(self.graph[e].adj_sparse('coo')) for s,e,d in self.graph.canonical_etypes}, 
+                    embedding_dim=self.emb_dim,
+                    metapath=metapath, 
+                    walk_length=self.walk_length,
+                    context_size=self.context_size,
+                    walks_per_node=self.walks_per_node,
+                    num_negative_samples=self.num_negative_samples).to(self.device)
+
+                print('training...')
+                loader = metapath2vec_model.loader(batch_size=self.batch_size, shuffle=True, num_workers=4)
+                optimizer = th.optim.Adam(metapath2vec_model.parameters(), lr=self.learning_rate)
+                metapath2vec_model.train()
+                for epoch in range(1, self.epochs + 1):
+                    for i, (pos_rw, neg_rw) in enumerate(loader):
+                        optimizer.zero_grad()
+                        loss = metapath2vec_model.loss(pos_rw.to(self.device), neg_rw.to(self.device))
+                        loss.backward()
+                        optimizer.step()
+                        if (i + 1) % self.logs == 0:
+                            print('\r',f'Epoch: {epoch:02d}, Step: {i + 1:03d}/{len(loader)}, 'f'Loss: {loss:.4f}', end=' ')
+                del loader, optimizer
+                print('loading...')
+                embedding_dict = {}
+                for node_type in metapath2vec_model.num_nodes_dict:
+                    # get embedding of node with specific type
+                    embedding_dict[node_type] = metapath2vec_model(node_type).detach().cpu()
+                del metapath2vec_model
+                nodes_embedding_path = self.preprocessed_dir+'/LFM-1b_nodes_embedding.pt'
+                th.save(embedding_dict, nodes_embedding_path)
+                print('saved! embedding_dict')
+                # for k,v in embedding_dict.items():
+                #     print(k,v.shape)                
             if self.artists==True:
                 # -------------------------ARTIST NODE DATA-------------------------
-                file_path=self.preprocessed_dir+'/'+'LFM-1b_artists.txt'
-                print('\t','------------------- Loading features from',file_path.split('_')[-1],'-------------------')
-                df = get_preprocessed_ids(file_path, type='artist', id_list=['artist_id','artist_name'])
-                df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
-                self.graph.nodes['artist'].data['id']=cat_encoder(df['artist_id'])
-                self.graph.nodes['artist'].data['name']=seq_encoder(df['artist_name'])
-                del df
+                if self.metapath2vec==True:
+                    self.graph.nodes['artist'].data['feat']=embedding_dict['artist']
+                else:
+                    file_path=self.preprocessed_dir+'/'+'LFM-1b_artists.txt'
+                    print('\t','Loading features from',file_path.split('_')[-1])
+                    df = get_preprocessed_ids(file_path, type='artist', id_list=['artist_id','artist_name'])
+                    df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                    # self.graph.nodes['artist'].data['id']=cat_encoder(df['artist_id'])
+                    # self.graph.nodes['artist'].data['name']=seq_encoder(df['artist_name'])
+                    print("artist_size",len(df['artist_id']))
+                    self.graph.nodes['artist'].data['feat']=id_encoder(df['artist_id'])
+                    del df
 
                 # -------------------------GENRE NODE DATA-------------------------
-                file_path=self.preprocessed_dir+'/'+'genres_allmusic.txt'
-                print('\t','------------------- Loading features from',file_path.split('_')[-1],'-------------------')
-                df = get_preprocessed_ids(file_path,type='genre' ,id_list=['genre_id','genre_name'])
-                self.graph.nodes['genre'].data['id']=cat_encoder(df['genre_id'])
-                self.graph.nodes['genre'].data['name']=seq_encoder(df['genre_name'])
-                del df
-                del mappings['artist_name_mapping']
-            
+                if self.metapath2vec==True:
+                    self.graph.nodes['genre'].data['feat']=embedding_dict['genre']
+                else:
+                    file_path=self.preprocessed_dir+'/'+'genres_allmusic.txt'
+                    print('\t','Loading features from',file_path.split('_')[-1])
+                    df = get_preprocessed_ids(file_path,type='genre' ,id_list=['genre_id','genre_name'])
+                    # self.graph.nodes['genre'].data['id']=cat_encoder(df['genre_id'])
+                    # self.graph.nodes['genre'].data['name']=seq_encoder(df['genre_name'])
+                    self.graph.nodes['genre'].data['feat']=id_encoder(df['genre_id'])
+                    del df
+                    del mappings['artist_name_mapping']
+                
             if self.albums==True:
-                # -------------------------ALBUM ID RE-MAPPING-------------------------
-                file_path=self.preprocessed_dir+'/'+'LFM-1b_albums.txt'
-                print('\t','------------------- Loading features from',file_path.split('_')[-1],'-------------------')
-                df = get_preprocessed_ids(file_path, type='album', id_list=['album_id','album_name','artist_id'])
-                df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
-                df=remap_ids(df, ordered_cols=['album_id'], mappings=[mappings['album_mapping']])
                 # -------------------------ALBUM NODE DATA-------------------------
-                self.graph.nodes['album'].data['id']=cat_encoder(df['album_id'])
-                self.graph.nodes['album'].data['name']=seq_encoder(df['album_name'])
-                del df
+                if self.metapath2vec==True:
+                    self.graph.nodes['album'].data['feat']=embedding_dict['album']
+                else:
+                    file_path=self.preprocessed_dir+'/'+'LFM-1b_albums.txt'
+                    print('\t','Loading features from',file_path.split('_')[-1])
+                    df = get_preprocessed_ids(file_path, type='album', id_list=['album_id','album_name','artist_id'])
+                    df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                    df=remap_ids(df, ordered_cols=['album_id'], mappings=[mappings['album_mapping']])
+                    # self.graph.nodes['album'].data['id']=cat_encoder(df['album_id'])
+                    # self.graph.nodes['album'].data['name']=seq_encoder(df['album_name'])
+                    self.graph.nodes['album'].data['feat']=id_encoder(df['album_id'])
+                    del df
 
             if self.tracks==True:
-                # -------------------------TRACK ID RE-MAPPING-------------------------
-                file_path=self.preprocessed_dir+'/'+'LFM-1b_tracks.txt'
-                print('\t','------------------- Loading features from',file_path.split('_')[-1],'-------------------')
-                df = get_preprocessed_ids(file_path, type='track', id_list=['track_id', 'track_name', 'artist_id'])
-                df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
-                df=remap_ids(df, ordered_cols=['track_id'], mappings=[mappings['track_mapping']])
                 # -------------------------TRACK NODE DATA-------------------------
-                self.graph.nodes['track'].data['id']=cat_encoder(df['track_id'])
-                self.graph.nodes['track'].data['name']=seq_encoder(df['track_name'])
+                if self.metapath2vec==True:
+                    self.graph.nodes['track'].data['feat']=embedding_dict['track']
+                else:
+                    file_path=self.preprocessed_dir+'/'+'LFM-1b_tracks.txt'
+                    print('\t','Loading features from',file_path.split('_')[-1])
+                    df = get_preprocessed_ids(file_path, type='track', id_list=['track_id', 'track_name', 'artist_id'])
+                    df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                    df=remap_ids(df, ordered_cols=['track_id'], mappings=[mappings['track_mapping']])     
+                    # self.graph.nodes['track'].data['id']=cat_encoder(df['track_id'])
+                    # self.graph.nodes['track'].data['name']=seq_encoder(df['track_name'])
+                    self.graph.nodes['track'].data['feat']=id_encoder(df['track_id'])
+                    del df
 
-                del df
-
-            # -------------------------USER ID RE-MAPPING-------------------------
-            file_path=self.preprocessed_dir+'/'+'LFM-1b_users.txt'
-            print('\t','------------------- Loading features from',file_path.split('_')[-1],'-------------------')
-            df = get_preprocessed_ids(file_path, type='user', id_list=['user_id','country','age','gender','playcount'])
-            df=remap_ids(df, ordered_cols=['user_id'], mappings=[mappings['user_mapping']])
             # -------------------------USER NODE DATA-------------------------
-            self.graph.nodes['user'].data['id']=cat_encoder(df['user_id'])
-            self.graph.nodes['user'].data['country']=cat_encoder(df['country'])
-            self.graph.nodes['user'].data['age']=th.tensor(df['age'], dtype=th.float)
-            self.graph.nodes['user'].data['gender']=cat_encoder(df['gender'])
-            self.graph.nodes['user'].data['playcount']=th.tensor(df['playcount'], dtype=th.float)
-            del df
+            if self.metapath2vec==True:
+                self.graph.nodes['user'].data['feat']=embedding_dict['user']
+            else:
+                file_path=self.preprocessed_dir+'/'+'LFM-1b_users.txt'
+                print('\t','Loading features from',file_path.split('_')[-1])
+                df = get_preprocessed_ids(file_path, type='user', id_list=['user_id','country','age','gender','playcount'])
+                df=remap_ids(df, ordered_cols=['user_id'], mappings=[mappings['user_mapping']])
+                # self.graph.nodes['user'].data['id']=cat_encoder(df['user_id'])
+                # self.graph.nodes['user'].data['country']=cat_encoder(df['country'])
+                # self.graph.nodes['user'].data['age']=th.tensor(df['age'], dtype=th.float)
+                # self.graph.nodes['user'].data['gender']=cat_encoder(df['gender'])
+                # self.graph.nodes['user'].data['playcount']=th.tensor(df['playcount'], dtype=th.float)
+                self.graph.nodes['user'].data['feat']=id_encoder(df['user_id'])
+                del df
 
             if self.artists==True:
                 # -------------------------USER->ARTISTS EDGE DATA-------------------------
@@ -318,7 +426,7 @@ class LFM1b(DGLDataset):
                         file_path,type='artist',
                         user_mapping=mappings['user_mapping'], 
                         groupby_mapping=mappings['artist_mapping'],
-                        relative_playcount=True
+                        relative_playcount=False
                         )
                     self.graph.edges['listened_to_artist'].data['weight']=id_encoder(playcounts)
                     self.graph.edges['artist_listened_by'].data['weight']=id_encoder(playcounts)
@@ -329,8 +437,8 @@ class LFM1b(DGLDataset):
                     user_mapping=mappings['user_mapping'], 
                     groupby_mapping=mappings['artist_mapping']
                     )
-                    self.graph.edges['listened_to_artist'].data['timestamp']=th.tensor((timestamps), dtype=th.float)
-                    self.graph.edges['artist_listened_by'].data['timestamp']=th.tensor((timestamps), dtype=th.float)
+                    self.graph.edges['listened_to_artist'].data['timestamp']=id_encoder(timestamps)
+                    self.graph.edges['artist_listened_by'].data['timestamp']=id_encoder(timestamps)
                     del timestamps
 
                 del mappings['artist_mapping']
@@ -346,7 +454,7 @@ class LFM1b(DGLDataset):
                         file_path,type='album',
                         user_mapping=mappings['user_mapping'], 
                         groupby_mapping=mappings['album_mapping'],
-                        relative_playcount=True
+                        relative_playcount=self.norm_playcount_weight
                         )
                     self.graph.edges['listened_to_album'].data['weight']=id_encoder(playcounts)
                     self.graph.edges['album_listened_by'].data['weight']=id_encoder(playcounts)
@@ -374,7 +482,7 @@ class LFM1b(DGLDataset):
                         file_path,type='track',
                         user_mapping=mappings['user_mapping'], 
                         groupby_mapping=mappings['track_mapping'],
-                        relative_playcount=True
+                        relative_playcount=False
                         )
                     self.graph.edges['listened_to_track'].data['weight']=id_encoder(playcounts)
                     self.graph.edges['track_listened_by'].data['weight']=id_encoder(playcounts)
@@ -393,8 +501,6 @@ class LFM1b(DGLDataset):
                 del user_id_list
                 del groupby_id_list
                 
-            
-                    
             del mappings
 
 
@@ -404,22 +510,66 @@ class LFM1b(DGLDataset):
 
     def __len__(self):
         return 1
+
   
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--name', default='DGL_LFM1b', type=str, help='name of directory in data folder')
     parser.add_argument('--n_users', default=None, type=str, help="number of LE rows rto collect for a subset of the full dataset")
-    parser.add_argument('--device', default='cpu', type=str, help='torch device to use for categorical encoding of ids')
-    parser.add_argument('--overwrite_preprocessed', default=False, type=bool, help='boolean indication wheter to overwrite preprocessed ')
-    parser.add_argument('--overwrite_processed', default=False, type=bool, help='boolean indication wheter to overwrite processed')
-    parser.add_argument('--artists', default=True, type=bool, help='boolean indication wheter to use the artist and genre nodes in the graph')
-    parser.add_argument('--albums', default=True, type=bool, help='boolean indication wheter to use the albums and genre nodes in the graph')
-    parser.add_argument('--tracks', default=True, type=bool, help='boolean indication wheter to use the tracks and genre nodes in the graph')
+    parser.add_argument('--device', default='cpu', type=str, help='GPU or CPU device specification')
+    parser.add_argument('--overwrite_preprocessed', default=False, type=str2bool, nargs='?', const=True, help='indication to overwrite preprocessed ')
+    parser.add_argument('--overwrite_processed', default=False, type=str2bool, nargs='?', const=True, help='indication to overwrite processed')
+    parser.add_argument('--artists', default=True, type=str2bool, nargs='?', const=True, help='indication to use the artist and genre nodes in the graph')
+    parser.add_argument('--albums', default=True, type=str2bool, nargs='?', const=True, help='indication to use the albums and genre nodes in the graph')
+    parser.add_argument('--tracks', default=True, type=str2bool, nargs='?', const=True, help='indication to use the tracks and genre nodes in the graph')
+    parser.add_argument('--playcount_weight', default=False, type=str2bool, nargs='?', const=True, help='indication to use the a single edge with weight feature, or every edge with timestamp features between a user and their unique listen events')
+    parser.add_argument('--norm_playcount_weight', default=True, type=str2bool, nargs='?', const=True, help='indication give every edge a "normalized playcount weight" feature, or "total playcount weight"')
+    parser.add_argument('--metapath2vec', default=True, type=str2bool, nargs='?', const=True, help='indication to use metapath2vec to encode node embeddings (recommended, otherwise manual adjustment may be required)')
+    parser.add_argument('--emb_dim', default=128, type=int,  help='node embedding vector size')
+    parser.add_argument('--walk_length', default=64, type=int,  help='length of metapath2vec walks')
+    parser.add_argument('--context_size', default=7, type=int,  help='context_size of metapath2vec')
+    parser.add_argument('--walks_per_node', default=3, type=int,  help='context_size of metapath2vec')
+    parser.add_argument('--num_negative_samples', default=5, type=int,  help='num_negative_samples of metapath2vec')
+    parser.add_argument('--metapath2vec_epochs_batch_size', default=128, type=int,  help='batch_size of metapath2vec')
+    parser.add_argument('--learning_rate', default=0.01, type=float,  help='learning_rate of metapath2vec')
+    parser.add_argument('--metapath2vec_epochs', default=5, type=int,  help='epochs of metapath2vec')
+    parser.add_argument('--logs', default=100, type=int,  help='logs of metapath2vec')
 
     args = parser.parse_args()
-    print('running with args...')
+    print('\n','running with args...')
     print(args)
-    
-    LFM1b(name=args.name, n_users=args.n_users, device=args.device)
+
+    LFM1b(
+        n_users=args.n_users, 
+        device=args.device, 
+        overwrite_preprocessed=args.overwrite_preprocessed,
+        overwrite_processed=args.overwrite_processed,
+        artists=args.artists,
+        albums=args.albums,
+        tracks=args.tracks,
+        playcount_weight=args.playcount_weight,
+        norm_playcount_weight=args.norm_playcount_weight,
+        metapath2vec=args.metapath2vec,
+        emb_dim=args.emb_dim, 
+        walk_length=args.walk_length,
+        context_size=args.context_size,
+        walks_per_node=args.walks_per_node,
+        num_negative_samples=args.num_negative_samples,
+        batch_size=args.metapath2vec_epochs_batch_size,
+        learning_rate=args.learning_rate,
+        epochs=args.metapath2vec_epochs,
+        logs=args.logs
+        )
+
+
+

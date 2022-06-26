@@ -3,8 +3,58 @@ import random
 import subprocess
 import numpy as np
 import pandas as pd
+import torch as th
+from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 tqdm.pandas(desc="progress-bar")
+
+class SequenceEncoder(object):
+    '''Converts a list of unique string values into a PyTorch tensor`'''
+    def __init__(self, model_name='all-MiniLM-L6-v2', device='cpu'):
+        self.device = device
+        self.model = SentenceTransformer(model_name, device=device)
+    @th.no_grad()
+    def __call__(self, list):
+        return self.model.encode(list, show_progress_bar=True,convert_to_tensor=True, device=self.device)
+
+class CategoricalEncoder(object):
+    '''Converts a list of string categorical values into a PyTorch tensor`'''
+    def __init__(self, device='cpu'):
+        self.device = device
+    def __call__(self, list):
+        categories = set(category for category in list)
+        mapping = {category: i for i, category in enumerate(categories)}
+        x = th.zeros(len(list), len(mapping), device=self.device)
+        for i, category in enumerate(list):
+            x[i, mapping[category]] = 1
+        return x.to(device=self.device)
+
+class IdentityEncoder(object):
+    '''Converts a list of floating-point values into a PyTorch tensor`'''
+    def __init__(self, dtype=th.float, device='cpu'):
+        self.dtype = dtype
+        self.device = device
+    def __call__(self, list):
+        return th.Tensor(list).view(-1, 1).to(self.dtype).to(self.device)
+
+# class BinaryEncoder(object):
+#     '''Converts a list of categorical numbers into a pytorch tensor'''
+#     def __init__(self, device=None, dtype=th.float):
+#         self.dtype=dtype
+#         self.device=device
+#     def __call__(self, arr):
+#         result = []
+#         for i, val in enumerate(tqdm(reversed(arr), total=len(arr))):
+#             encoding=[float(i) for i in bin(val)[2:]]
+#             if (i==0):
+#                 max_size=len(encoding)
+            
+#             if max_size > len(encoding):
+#                 diff=max_size - len(encoding)
+#                 encoding=[0 for _ in range(diff)] + encoding
+#             result.append(encoding)
+
+#         return th.tensor(list(reversed(result))).to(self.dtype).to(self.device)
 
 def getType(col):
     '''
@@ -208,7 +258,7 @@ def get_bad_name_ids(file_path, type):
                     chunk=chunk[~chunk[col].isin(bad_vals)].copy()
                     chunk[col]=[setType(x,col) for x in chunk[col]]
                     chunk[col]=chunk[col].astype(getType(col)).copy()
-        chunk=chunk[chunk[col_name_id]=='nan']
+        chunk=chunk[chunk[col_name_id].isin(['nan',col_name_id])]
         bad_ids+=list(chunk[type+'_id'].values) # set unique values of the column 
     return list(set(bad_ids))
 
@@ -292,7 +342,11 @@ def get_preprocessed_ids(file_path, type, return_unique_ids=False, id_list=None)
             try:
                 chunk[col]=chunk[col].astype(getType(col)).copy() # try to set type
             except:
-                raise Exception('type not correct in preprocessed file')
+                try:
+                    chunk[col]=[setType(x,col) for x in chunk[col]].copy() # try to force type
+                    chunk[col]=chunk[col].astype(getType(col)).copy()
+                except:
+                    raise Exception('type not correct in preprocessed file')
         if return_unique_ids:
             # all the columns are of the correct datatype now
             for id_col in id_list: # for every column we want to return
@@ -392,9 +446,11 @@ def remap_ids(col_dict, ordered_cols, mappings):
     Returns:
     (dict)- a dictionry of the remapped items
     '''
+    print('remapping_ids')
     new_mapping={col_name:list() for col_name in col_dict.keys()}
     length=len(col_dict[ordered_cols[0]])
     skipped=0
+    bad_vals={k:list() for k in ordered_cols}
     for row_index in tqdm(range(length), total=length):
         bad_row=False
         for mapping, col_name in zip(mappings,ordered_cols):
@@ -402,6 +458,7 @@ def remap_ids(col_dict, ordered_cols, mappings):
                 val=col_dict[col_name][row_index]
                 new_mapping[col_name].append(mapping[val])
             except:
+                bad_vals[col_name].append(val)
                 bad_row=True
         if bad_row ==False:
             for col_name in col_dict.keys():
@@ -410,11 +467,11 @@ def remap_ids(col_dict, ordered_cols, mappings):
                     new_mapping[col_name].append(val)
         else:
             skipped+=1
-    # print(f'remapped {col_dict.keys()} skipped {skipped} bad ids')
+    # print('skipped',skipped)
     return new_mapping
 
 
-def get_artist_genre_df(artist_genres_allmusic_path, artist_name_to_id_mapping):
+def get_artist_genre_df(artist_genres_allmusic_path, artist_name_to_id_mapping, artist_id_to_id_mapping,  preprocessed_path):
     '''
     Description:
     get_artist_genre_df is a special function that reads into the genre collections of provied by the LFM1b databased 
@@ -431,6 +488,9 @@ def get_artist_genre_df(artist_genres_allmusic_path, artist_name_to_id_mapping):
     file=open(artist_genres_allmusic_path, 'r')
     lines=file.readlines()
     data={'artist_id':list(),'genre_id':list()}
+    artists_pre_path=preprocessed_path+'/LFM-1b_artists.txt'
+
+
     
     for line in lines:
         info=line.strip().split('\t')
@@ -441,29 +501,39 @@ def get_artist_genre_df(artist_genres_allmusic_path, artist_name_to_id_mapping):
                 data['artist_id'].append(artist_name_to_id_mapping[name])
                 data['genre_id'].append(genre)
 
-    return pd.DataFrame(data)
+    found_ids=set(data['artist_id'])
+    
+    for artist in tqdm(artist_id_to_id_mapping.keys(), total=len(artist_id_to_id_mapping.keys())):
+        if artist not in found_ids:
+            data['artist_id'].append(artist)
+            data['genre_id'].append(20)
+    df = remap_ids(data, ordered_cols=['artist_id'], mappings=[artist_id_to_id_mapping])
+
+    return df
 
 
 
-def filterRaw(type, ids, df_path, output_path, fix_user_entires=False, artist_ids=None):
+def filterRaw(type, df_path, output_path, fix_user_entires=False, bad_ids=list(), bad_id_col=None, good_ids=list(), good_id_col=None):
     print(f'----------------------------                 Filtering Original {type} File                    ----------------------------')
     col_names=get_col_names(type)
     df = get_raw_df(df_path, type=type)
-    df = df[df[col_names[0]].isin(ids)].copy()
-    if artist_ids!=None:
-        df = df[df['artist_id'].isin(artist_ids)].copy()
+    if bad_id_col!=None:
+        df = df[~df[bad_id_col].isin(bad_ids)].copy()
+    if good_id_col!=None:
+        df = df[df[good_id_col].isin(good_ids)].copy()
     if fix_user_entires == True:
-        df['country']=df['country'].replace('nan','NoCountry').copy()
-        df['gender']=df['gender'].replace('nan','NoGender').copy()
+        df['country']=df['country'].replace('nan','NA').copy()
+        df['gender']=df['gender'].replace('nan','NA').copy()
+    
     df.to_csv(output_path, columns=col_names, sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
 
-def filterLEs(input_path, type, output_path, bad_ids, cols_to_filter, load_raw=True):
+def filterLEs(input_path, type, output_path, good_ids, cols_to_filter, load_raw=True):
     ''' 
     the filterLEs reads the LEs from a specified input file and filters the ids based on each 
     list in bad_ids specified by the id column in cols_to_filter. After filtered the data is saved in the output path
     '''
     print(f'----------------------------                 Filtering Les                    ----------------------------')
-    chunksize=10000
+    chunksize=1000000
     column_names=get_col_names(type='le')
     if load_raw==False:
         df_chunks = pd.read_csv(input_path, names=column_names, sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
@@ -471,24 +541,9 @@ def filterLEs(input_path, type, output_path, bad_ids, cols_to_filter, load_raw=T
         df_chunks = pd.read_csv(input_path, names=column_names, sep="\t", encoding='utf8', chunksize=chunksize)
     size = get_fileSize(input_path)
     for i, chunk in enumerate(tqdm(df_chunks, total=size//chunksize)):
-        for col, ids_list in zip(cols_to_filter,bad_ids):
-            try:
-                chunk[col]=chunk[col].astype(getType(col)).copy()
-            except:
-                try:
-                    chunk[col]=[setType(x,col) for x in chunk[col]].copy()
-                    chunk[col]=chunk[col].astype(getType(col)).copy()
-                except:
-                    bad_vals=[]
-                    for x in chunk[col].unique().tolist():
-                        if isValid(x,col) ==False:
-                            bad_vals.append(x)
-                    bad_vals=np.unique(bad_vals)
-                    # print('chunk bad vals',bad_vals)
-                    chunk=chunk[~chunk[col].isin(bad_vals)].copy()
-                    chunk[col]=[setType(x,col) for x in chunk[col]]
-                    chunk[col]=chunk[col].astype(getType(col)).copy()
-            chunk = chunk[~chunk[col].isin(ids_list)].copy()
+        for col, ids_list in zip(cols_to_filter,good_ids):
+            chunk[col]=chunk[col].astype(getType(col)).copy()
+            chunk = chunk[chunk[col].isin(ids_list)].copy()
         if i==0:
             chunk.to_csv(output_path, columns=get_col_names(type), sep="\t", encoding='utf8', index=False, header=True, mode='w')
         else:
@@ -514,7 +569,7 @@ def get_user_info(user_info, u_id, country_percs, gender_percs):
     return u_id_country, u_id_age, u_id_gender, u_id_playcount
 
 
-def preprocess_raw(raw_path, preprocessed_path, n_users=None, overwrite=False):
+def preprocess_raw(raw_path, preprocessed_path, n_users=None):
     ''' 
     Description:
     The preprocess_raw fucniton works in two ways....
@@ -548,45 +603,79 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None, overwrite=False):
     tracks_pre_path=preprocessed_path+'/LFM-1b_tracks.txt'
     users_pre_path=preprocessed_path+'/LFM-1b_users.txt'
     genres_pre_path=preprocessed_path+'/genres_allmusic.txt'
-
+    
     if n_users==None:
-        print(f'making subset of all users')
-
-        unique_le_ids = get_raw_ids(les_raw_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
-        artist_id_dict = get_raw_ids(artists_raw_path, type='artist', return_unique_ids=True, id_list=['artist_id'])
-        bad_artist_name_ids = get_bad_name_ids(artists_raw_path, type='artist')
-        album_id_dict=get_raw_ids(albums_raw_path, type='album', return_unique_ids=True, id_list=['album_id','artist_id'])
-        bad_album_name_ids = get_bad_name_ids(albums_raw_path, type='album')
-        track_id_dict=get_raw_ids(tracks_raw_path, type='track', return_unique_ids=True, id_list=['track_id','artist_id'])
-        bad_track_name_ids = get_bad_name_ids(tracks_raw_path, type='track')
-        
-        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
-        total_bad_artist_ids = np.unique(get_bad_ids(artist_id_dict['artist_id'], [album_id_dict['artist_id'],track_id_dict['artist_id'], unique_le_ids['artist_id']], type='artist')+bad_artist_name_ids)
-        total_bad_album_ids = np.unique(get_bad_ids(album_id_dict['album_id'], [unique_le_ids['album_id']], type='album')+bad_album_name_ids)
-        total_bad_track_ids = np.unique(get_bad_ids(track_id_dict['track_id'], [unique_le_ids['track_id']], type='track')+bad_track_name_ids)
-        if overwrite:
+        preprocessed_files_dont_exist = os.path.exists(os.path.join(les_pre_path)) == False or os.path.exists(os.path.join(albums_pre_path)) == False or os.path.exists(os.path.join(artists_pre_path)) == False or os.path.exists(os.path.join(tracks_pre_path)) == False or os.path.exists(os.path.join(users_pre_path)) == False or os.path.exists(os.path.join(genres_pre_path)) == False
+        if preprocessed_files_dont_exist==False:
             os.remove(les_pre_path)
             os.remove(artists_pre_path)
             os.remove(albums_pre_path)
             os.remove(tracks_pre_path)
             os.remove(users_pre_path)
             os.remove(genres_pre_path)
-        filterLEs(les_raw_path, type='le', output_path=les_pre_path, bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'])
-        unique_le_ids = get_preprocessed_ids(les_pre_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
+
+        artists = get_raw_ids(artists_raw_path, type='artist', return_unique_ids=True, id_list=['artist_id'])
+        albums = get_raw_ids(albums_raw_path, type='album', return_unique_ids=True, id_list=['artist_id'])
+        tracks = get_raw_ids(tracks_raw_path, type='track', return_unique_ids=True, id_list=['artist_id'])
+        good_artist_ids = (set(albums['artist_id']) & set(tracks['artist_id'])) & set(artists['artist_id'])
+        print("len(good_artist_ids)",print(len(good_artist_ids)))
+
+        bad_artist_ids_names=get_bad_name_ids(artists_raw_path, type='artist')
+        bad_album_ids_names=get_bad_name_ids(albums_raw_path, type='album')
+        bad_track_ids_names=get_bad_name_ids(tracks_raw_path, type='album')
+
+        filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
         
-        filterRaw('user', unique_le_ids['user_id'], users_raw_path, users_pre_path, fix_user_entires=True)
-        filterRaw('artist', unique_le_ids['artist_id'], artists_raw_path, artists_pre_path)
-        filterRaw('album', unique_le_ids['album_id'], albums_raw_path, albums_pre_path, artist_ids=unique_le_ids['artist_id'])
-        filterRaw('track', unique_le_ids['track_id'], tracks_raw_path, tracks_pre_path, artist_ids=unique_le_ids['artist_id'])
-    
+        print('verifying artists')
+        artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
+        albums = get_preprocessed_ids(albums_pre_path, type='album', id_list=['album_id','artist_id'])
+        tracks = get_preprocessed_ids(tracks_pre_path, type='track', id_list=['track_id','artist_id'])
+        print('Artist ids do not match')
+        good_artist_ids = (set(albums['artist_id']) & set(tracks['artist_id'])) & set(artists['artist_id'])
+        print("len(good_artist_ids)",print(len(good_artist_ids)))
+
+        os.remove(artists_pre_path)
+        os.remove(albums_pre_path)
+        os.remove(tracks_pre_path)
+        filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+
+        print('verifying artists')
+        users = get_preprocessed_ids(users_pre_path, type='user', id_list=['user_id'])
+        artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
+        albums = get_preprocessed_ids(albums_pre_path, type='album', id_list=['album_id','artist_id'])
+        tracks = get_preprocessed_ids(tracks_pre_path, type='track', id_list=['track_id','artist_id'])
+        condition = len(artists['artist_id'])==len(np.unique(albums['artist_id']))==len(np.unique(tracks['artist_id']))
+        if condition==False:
+            print("len(artists['artist_id'])",len(artists['artist_id']))
+            print("len(albums['artist_id'])",len(np.unique(albums['artist_id'])))
+            print("len(tracks['artist_id'])",len(np.unique(tracks['artist_id'])))
+            raise Exception('artist ids do not match')
+        else:
+            print('Artist ids match')
+
+        good_user_ids=set(users['user_id'])
+        good_artist_ids=set(artists['artist_id'])
+        good_album_ids=set(albums['album_id'])
+        good_track_ids=set(tracks['track_id'])
+        del artists, albums, tracks
+        filterLEs(les_raw_path, type='le', output_path=les_pre_path, good_ids=[good_user_ids,good_artist_ids,good_album_ids,good_track_ids], cols_to_filter=['user_id','artist_id','album_id','track_id'])
+
+        les = get_preprocessed_ids(les_pre_path, type='le', id_list=['user_id'])
+        good_user_ids=set(les['user_id'])
+        del les
+        filterRaw('user', users_raw_path, users_pre_path, fix_user_entires=True, bad_ids=list(), bad_id_col=None, good_ids=user_id_collection, good_id_col='user_id')
+
         file_path=raw_path+'_UGP/genres_allmusic.txt'
         df = pd.read_csv(file_path, names=['genre_name'])
         df['genre_id']=df['genre_name'].index
         df=df.reindex(columns=['genre_id', 'genre_name'])
-        output_path=genres_pre_path
-        df.to_csv(output_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
+        df.loc[len(df.index)] = [20,'na'] 
+        df.to_csv(genres_pre_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
 
-        del df
     else:
         n_users=int(n_users)
         print(f'making subset of {n_users} users')
@@ -704,44 +793,73 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None, overwrite=False):
 
         pbar.close()
 
-        total_bad_user_ids=[]
-        unique_le_user_id_ids_size=len(user_info['user_id'])
-        for id in tqdm(user_info['user_id'], total=unique_le_user_id_ids_size):
-            if id not in user_id_collection:
-                total_bad_user_ids.append(id)
-
-        unique_le_ids = get_raw_ids(les_raw_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
-        artist_id_dict = get_raw_ids(artists_raw_path, type='artist', return_unique_ids=True, id_list=['artist_id'])
-        bad_artist_name_ids = get_bad_name_ids(artists_raw_path, type='artist')
-        album_id_dict=get_raw_ids(albums_raw_path, type='album', return_unique_ids=True, id_list=['album_id','artist_id'])
-        bad_album_name_ids = get_bad_name_ids(albums_raw_path, type='album')
-        track_id_dict=get_raw_ids(tracks_raw_path, type='track', return_unique_ids=True, id_list=['track_id','artist_id'])
-        bad_track_name_ids = get_bad_name_ids(tracks_raw_path, type='track')
-        
-        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
-        total_bad_artist_ids = np.unique(get_bad_ids(artist_id_dict['artist_id'], [album_id_dict['artist_id'],track_id_dict['artist_id'], unique_le_ids['artist_id']], type='artist')+bad_artist_name_ids)
-        total_bad_album_ids = np.unique(get_bad_ids(album_id_dict['album_id'], [unique_le_ids['album_id']], type='album')+bad_album_name_ids)
-        total_bad_track_ids = np.unique(get_bad_ids(track_id_dict['track_id'], [unique_le_ids['track_id']], type='track')+bad_track_name_ids)
-        if overwrite:
+        preprocessed_files_dont_exist = os.path.exists(os.path.join(les_pre_path)) == False or os.path.exists(os.path.join(albums_pre_path)) == False or os.path.exists(os.path.join(artists_pre_path)) == False or os.path.exists(os.path.join(tracks_pre_path)) == False or os.path.exists(os.path.join(users_pre_path)) == False or os.path.exists(os.path.join(genres_pre_path)) == False
+        if preprocessed_files_dont_exist==False:
             os.remove(les_pre_path)
             os.remove(artists_pre_path)
             os.remove(albums_pre_path)
             os.remove(tracks_pre_path)
             os.remove(users_pre_path)
             os.remove(genres_pre_path)
-        filterLEs(les_raw_path, type='le', output_path=les_pre_path, bad_ids=[total_bad_user_ids,total_bad_album_ids,total_bad_track_ids,total_bad_artist_ids], cols_to_filter=['user_id','track_id','album_id','artist_id'])
-        unique_le_ids = get_preprocessed_ids(les_pre_path, type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
+
         
-        filterRaw('user', unique_le_ids['user_id'], users_raw_path, users_pre_path, fix_user_entires=True)
-        filterRaw('artist', unique_le_ids['artist_id'], artists_raw_path, artists_pre_path)
-        filterRaw('album', unique_le_ids['album_id'], albums_raw_path, albums_pre_path, artist_ids=unique_le_ids['artist_id'])
-        filterRaw('track', unique_le_ids['track_id'], tracks_raw_path, tracks_pre_path, artist_ids=unique_le_ids['artist_id'])
-    
+        artists = get_raw_ids(artists_raw_path, type='artist', return_unique_ids=True, id_list=['artist_id'])
+        albums = get_raw_ids(albums_raw_path, type='album', return_unique_ids=True, id_list=['artist_id'])
+        tracks = get_raw_ids(tracks_raw_path, type='track', return_unique_ids=True, id_list=['artist_id'])
+        good_artist_ids = (set(albums['artist_id']) & set(tracks['artist_id'])) & set(artists['artist_id'])
+        print("len(good_artist_ids)",print(len(good_artist_ids)))
+
+        bad_artist_ids_names=get_bad_name_ids(artists_raw_path, type='artist')
+        bad_album_ids_names=get_bad_name_ids(albums_raw_path, type='album')
+        bad_track_ids_names=get_bad_name_ids(tracks_raw_path, type='album')
+
+        filterRaw('user', users_raw_path, users_pre_path, fix_user_entires=True, bad_ids=list(), bad_id_col=None, good_ids=user_id_collection, good_id_col='user_id')
+        filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        
+        print('verifying artists')
+        artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
+        albums = get_preprocessed_ids(albums_pre_path, type='album', id_list=['album_id','artist_id'])
+        tracks = get_preprocessed_ids(tracks_pre_path, type='track', id_list=['track_id','artist_id'])
+        print('Artist ids do not match')
+        good_artist_ids = (set(albums['artist_id']) & set(tracks['artist_id'])) & set(artists['artist_id'])
+        print("len(good_artist_ids)",print(len(good_artist_ids)))
+
+        os.remove(artists_pre_path)
+        os.remove(albums_pre_path)
+        os.remove(tracks_pre_path)
+        filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+
+        print('verifying artists')
+        users = get_preprocessed_ids(users_pre_path, type='user', id_list=['user_id'])
+        artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
+        albums = get_preprocessed_ids(albums_pre_path, type='album', id_list=['album_id','artist_id'])
+        tracks = get_preprocessed_ids(tracks_pre_path, type='track', id_list=['track_id','artist_id'])
+        condition = len(artists['artist_id'])==len(np.unique(albums['artist_id']))==len(np.unique(tracks['artist_id']))
+        if condition==False:
+            print("len(artists['artist_id'])",len(artists['artist_id']))
+            print("len(albums['artist_id'])",len(np.unique(albums['artist_id'])))
+            print("len(tracks['artist_id'])",len(np.unique(tracks['artist_id'])))
+            raise Exception('artist ids do not match')
+        else:
+            print('Artist ids match')
+
+        good_user_ids=set(users['user_id'])
+        good_artist_ids=set(artists['artist_id'])
+        good_album_ids=set(albums['album_id'])
+        good_track_ids=set(tracks['track_id'])
+        del artists, albums, tracks
+        filterLEs(les_raw_path, type='le', output_path=les_pre_path, good_ids=[good_user_ids,good_artist_ids,good_album_ids,good_track_ids], cols_to_filter=['user_id','artist_id','album_id','track_id'])
+
         file_path=raw_path+'_UGP/genres_allmusic.txt'
         df = pd.read_csv(file_path, names=['genre_name'])
         df['genre_id']=df['genre_name'].index
         df=df.reindex(columns=['genre_id', 'genre_name'])
-        output_path=genres_pre_path
-        df.to_csv(output_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
+        df.loc[len(df.index)] = [20,'na'] 
+        df.to_csv(genres_pre_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
+        
 
-        del df
+    
