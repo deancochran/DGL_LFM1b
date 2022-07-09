@@ -3,6 +3,7 @@ import random
 import subprocess
 import numpy as np
 import pandas as pd
+from regex import F
 import torch as th
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
@@ -331,7 +332,7 @@ def get_preprocessed_ids(file_path, type, return_unique_ids=False, id_list=None)
     Returns:
     (dict)- a dictionry of ids with the column names specified in the id_list as keys
     '''
-    # print(f'---------------------------- Loading Preprocessed {type} file  ----------------------------')
+    print(f'---------------------------- Loading Preprocessed {type} file  ----------------------------')
     chunksize=100000 # set chunksize
     df_chunks = pd.read_csv(file_path, names=get_col_names(type), sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
     # if we only want the values in certain columns
@@ -400,9 +401,10 @@ def get_le_playcount(file_path, type, user_mapping, groupby_mapping, relative_pl
     Returns:
     (dict)- a dictionry of ids with the column names specified in the id_list as keys
     '''
+    print(f'---------------------------- Loading {type} Playcounts  ----------------------------')
     type_id = type+'_id'
     print(f'loading {type} playcounts for every user')
-    chunksize=10000000
+    chunksize=100000000
     df_chunks = pd.read_csv(file_path, names=get_col_names('le'), sep="\t", encoding='utf8', header = 0, chunksize=chunksize)
     size = get_fileSize(file_path) # get size of file
     playcount_dict={}
@@ -569,7 +571,7 @@ def get_user_info(user_info, u_id, country_percs, gender_percs):
     return u_id_country, u_id_age, u_id_gender, u_id_playcount
 
 
-def preprocess_raw(raw_path, preprocessed_path, n_users=None):
+def preprocess_raw(raw_path, preprocessed_path, n_users=None, popular_artists=False):
     ''' 
     Description:
     The preprocess_raw fucniton works in two ways....
@@ -625,8 +627,8 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         bad_track_ids_names=get_bad_name_ids(tracks_raw_path, type='album')
 
         filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='album_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='track_id', good_ids=good_artist_ids, good_id_col='artist_id')
         
         print('verifying artists')
         artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
@@ -640,11 +642,11 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         os.remove(albums_pre_path)
         os.remove(tracks_pre_path)
         filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='album_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='track_id', good_ids=good_artist_ids, good_id_col='artist_id')
 
         print('verifying artists')
-        users = get_preprocessed_ids(users_pre_path, type='user', id_list=['user_id'])
+        # users = get_preprocessed_ids(users_pre_path, type='user', id_list=['user_id'])
         artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
         albums = get_preprocessed_ids(albums_pre_path, type='album', id_list=['album_id','artist_id'])
         tracks = get_preprocessed_ids(tracks_pre_path, type='track', id_list=['track_id','artist_id'])
@@ -657,15 +659,16 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         else:
             print('Artist ids match')
 
-        good_user_ids=set(users['user_id'])
+        # good_user_ids=set(users['user_id'])
         good_artist_ids=set(artists['artist_id'])
         good_album_ids=set(albums['album_id'])
         good_track_ids=set(tracks['track_id'])
         del artists, albums, tracks
-        filterLEs(les_raw_path, type='le', output_path=les_pre_path, good_ids=[good_user_ids,good_artist_ids,good_album_ids,good_track_ids], cols_to_filter=['user_id','artist_id','album_id','track_id'])
+        # filterLEs(les_raw_path, type='le', output_path=les_pre_path, good_ids=[good_user_ids,good_artist_ids,good_album_ids,good_track_ids], cols_to_filter=['user_id','artist_id','album_id','track_id'])
+        filterLEs(les_raw_path, type='le', output_path=les_pre_path, good_ids=[good_artist_ids,good_album_ids,good_track_ids], cols_to_filter=['artist_id','album_id','track_id'])
 
         les = get_preprocessed_ids(les_pre_path, type='le', id_list=['user_id'])
-        good_user_ids=set(les['user_id'])
+        user_id_collection=set(les['user_id'])
         del les
         filterRaw('user', users_raw_path, users_pre_path, fix_user_entires=True, bad_ids=list(), bad_id_col=None, good_ids=user_id_collection, good_id_col='user_id')
 
@@ -803,7 +806,27 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
             os.remove(genres_pre_path)
 
         
-        artists = get_raw_ids(artists_raw_path, type='artist', return_unique_ids=True, id_list=['artist_id'])
+
+        if popular_artists==True:
+            artists = get_raw_ids('data/DGL_LFM1b/DGL_LFM1b/LFM-1b_artists.txt', type='artist', id_list=['artist_id'])
+            le_artists = get_raw_ids('data/DGL_LFM1b/DGL_LFM1b/LFM-1b_LEs.txt', type='le', id_list=['artist_id'])
+            print('making playcounts')
+            playcounts={id:0 for id in artists['artist_id']}
+            for id in tqdm(le_artists['artist_id'], total=len(le_artists['artist_id'])):
+                if id in playcounts.keys():
+                    playcounts[id]+=1
+            del le_artists
+            popularity_cutoff=round(np.mean([list(playcounts.values())])+(np.std([list(playcounts.values())])*1.5))
+            print('making artist subset')
+            popular_artists=[]
+            for k, v in playcounts.items():
+                if v>popularity_cutoff:
+                    popular_artists.append(int(k))
+            artists['artist_id']=popular_artists
+            
+        else:
+            artists = get_raw_ids(artists_raw_path, type='artist', return_unique_ids=True, id_list=['artist_id'])
+
         albums = get_raw_ids(albums_raw_path, type='album', return_unique_ids=True, id_list=['artist_id'])
         tracks = get_raw_ids(tracks_raw_path, type='track', return_unique_ids=True, id_list=['artist_id'])
         good_artist_ids = (set(albums['artist_id']) & set(tracks['artist_id'])) & set(artists['artist_id'])
@@ -815,8 +838,8 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
 
         filterRaw('user', users_raw_path, users_pre_path, fix_user_entires=True, bad_ids=list(), bad_id_col=None, good_ids=user_id_collection, good_id_col='user_id')
         filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='album_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='track_id', good_ids=good_artist_ids, good_id_col='artist_id')
         
         print('verifying artists')
         artists = get_preprocessed_ids(artists_pre_path, type='artist', id_list=['artist_id'])
@@ -830,8 +853,8 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None):
         os.remove(albums_pre_path)
         os.remove(tracks_pre_path)
         filterRaw('artist', artists_raw_path, artists_pre_path, fix_user_entires=False, bad_ids=bad_artist_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
-        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='artist_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('album', albums_raw_path, albums_pre_path, fix_user_entires=False, bad_ids=bad_album_ids_names, bad_id_col='album_id', good_ids=good_artist_ids, good_id_col='artist_id')
+        filterRaw('track', tracks_raw_path, tracks_pre_path, fix_user_entires=False, bad_ids=bad_track_ids_names, bad_id_col='track_id', good_ids=good_artist_ids, good_id_col='artist_id')
 
         print('verifying artists')
         users = get_preprocessed_ids(users_pre_path, type='user', id_list=['user_id'])
