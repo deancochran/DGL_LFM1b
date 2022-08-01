@@ -17,7 +17,7 @@ class LFM1b(DGLDataset):
     def __init__(self, 
     n_users=None, 
     popular_artists=False,
-    device='cpu', 
+    device='cpu',  # DEPRECATED THIS DOES NOT AFFECT LFM-1b (the data loader is always in CPU)
     overwrite_preprocessed=False, 
     overwrite_processed=False,
     artists=True,
