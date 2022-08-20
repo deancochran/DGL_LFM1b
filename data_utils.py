@@ -816,7 +816,7 @@ def preprocess_raw(raw_path, preprocessed_path, n_users=None, popular_artists=Fa
                 if id in playcounts.keys():
                     playcounts[id]+=1
             del le_artists
-            popularity_cutoff=round(np.mean([list(playcounts.values())])+(np.std([list(playcounts.values())])*1.5))
+            popularity_cutoff=round(np.mean([list(playcounts.values())])+(np.std([list(playcounts.values())])*2.5))
             print('making artist subset')
             popular_artists=[]
             for k, v in playcounts.items():

@@ -26,7 +26,7 @@ class LFM1b(DGLDataset):
     playcount_weight=False,
     norm_playcount_weight=True,
     metapath2vec=True,
-    emb_dim=32,
+    emb_dim=8,
     walk_length=64,
     context_size=7,
     walks_per_node=3,
