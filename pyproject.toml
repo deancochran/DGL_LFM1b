@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lfm1b-protocol"
+version = "0.1.0"
+description = "Dependency-free leakage-free evaluation protocol for LFM-1b"
+requires-python = ">=3.8"
+
+[project.scripts]
+lfm1b-protocol = "lfm1b_protocol.cli:main"
+
+[tool.setuptools]
+packages = ["lfm1b_protocol"]
