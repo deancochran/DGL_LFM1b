@@ -229,11 +229,11 @@ The current package should not be described as capable of loading an unbounded
 full ListenBrainz dump. Full-catalog candidate derivation and scoring also have
 inherent user-by-catalog cost.
 
-The 103-test standard-library suite passes under Python 3.11 and 3.14, including
+The 104-test standard-library suite passes under Python 3.11 and 3.14, including
 15 focused acquisition tests, 17 comparison tests, and 10 ListenBrainz tests
 for discovery, integrity, filesystem safety, parsing, identity,
 per-user and global splitting, rehashed semantic tampering, baseline scores,
-bundle/graph binding, CLI flow, and nonidentity local-path provenance. Five
+bundle/graph binding, CLI flow, and nonidentity local-path provenance. Six
 additional matrix tests cover staged local preparation and planning across both
 adapters. The 41 Python files also parse with the Python 3.8 grammar. This is
 synthetic protocol evidence, not real-dump compatibility or model-quality

@@ -904,14 +904,17 @@ def _resolve_matrix_contrasts(spec, index, comparison_plan, report):
     return dict(identity, contrast_plan_hash=sha256(identity))
 
 
-def validate_matrix_contrast_plan(
+def _validate_matrix_contrast_plan_validated(
         contrast_plan, spec, index, comparison_plan, report,
-        expected_contrast_plan_hash=None, expected_report_hash=None):
-    spec = validate_mask_matrix_spec(spec)
-    index = validate_matrix_index(index, spec)
-    comparison_plan = validate_plan(comparison_plan)
-    report = validate_report(report, expected_report_hash)
-    if comparison_plan != create_matrix_comparison_plan(spec, index):
+        expected_matrix_plan, expected_contrast_plan_hash=None):
+    """Validate a contrast plan after its external inputs were pinned once.
+
+    ``create_matrix_comparison_plan`` reloads every artifact to prove the
+    plan remains bound to the index.  A resolver has already paid for that
+    proof, so its generated output can reuse it rather than reloading the
+    same untrusted artifacts several times in one command.
+    """
+    if comparison_plan != expected_matrix_plan:
         raise ComparisonError("comparison plan was not generated from this matrix")
     if report["plan_hash"] != comparison_plan["plan_hash"]:
         raise ComparisonError("matrix report does not belong to the comparison plan")
@@ -940,6 +943,19 @@ def validate_matrix_contrast_plan(
     return contrast_plan
 
 
+def validate_matrix_contrast_plan(
+        contrast_plan, spec, index, comparison_plan, report,
+        expected_contrast_plan_hash=None, expected_report_hash=None):
+    spec = validate_mask_matrix_spec(spec)
+    index = validate_matrix_index(index, spec)
+    comparison_plan = validate_plan(comparison_plan)
+    report = validate_report(report, expected_report_hash)
+    expected_matrix_plan = create_matrix_comparison_plan(spec, index)
+    return _validate_matrix_contrast_plan_validated(
+        contrast_plan, spec, index, comparison_plan, report,
+        expected_matrix_plan, expected_contrast_plan_hash)
+
+
 def resolve_matrix_contrast_plan(
         spec, index, comparison_plan, report, expected_spec_hash=None,
         expected_index_hash=None, expected_plan_hash=None,
@@ -956,8 +972,13 @@ def resolve_matrix_contrast_plan(
         raise ComparisonError("matrix report does not belong to the comparison plan")
     contrast_plan = _resolve_matrix_contrasts(
         spec, index, comparison_plan, report)
-    return validate_matrix_contrast_plan(
-        contrast_plan, spec, index, comparison_plan, report)
+    # The contrast plan was just deterministically generated from inputs that
+    # were each strictly validated above.  Reuse the one artifact-backed plan
+    # proof rather than invoking the public validator, which would reload all
+    # matrix artifacts a second time.
+    return _validate_matrix_contrast_plan_validated(
+        contrast_plan, spec, index, comparison_plan, report,
+        expected_matrix_plan)
 
 
 def create_contrast_analysis_from_matrix_plan(

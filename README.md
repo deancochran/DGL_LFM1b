@@ -431,17 +431,33 @@ Run the standard-library test suite with:
 
     PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v
 
-The 103-test combined suite was locally checked under Python 3.11 and 3.14.
+The 104-test combined suite was locally checked under Python 3.11 and 3.14.
 Fifteen focused acquisition tests exercise dynamic discovery, strict HTTP
 resume, mirrors, signed metadata, and filesystem hygiene. Seventeen comparison tests
 exercise both adapters, workload limits, path safety, semantic tampering,
 deterministic reports, and paired model/seed/mask contrasts. Ten tests directly
-exercise the ListenBrainz wrapper, and five matrix tests exercise both adapters,
+exercise the ListenBrainz wrapper, and six matrix tests exercise both adapters,
 the complete staged CLI, relocation, one-axis resolution, and fail-closed
 limits/tampering. The checked-in property test includes a
 1,920-configuration randomized cross-product over split, repeat, catalog,
 horizon, sample-size, and seed choices. All 41 Python files also parse with the
 Python 3.8 grammar.
+
+Bounded synthetic validation has completed an LFM event-repetition ladder from
+10,000 through 100,000 events with 250 users, 600 catalog tracks, 12 unique
+training tracks, and fixed eight validation/eight test positives per user.
+All rungs used eight masks, three baselines, both splits, full-catalog track
+evaluation, and K=10. A separate 500-user/600-track run completed with an
+explicit experiment-only 15-million ranking-item budget. Stages retained
+300-second and 2-GiB process limits. These are separate tested configurations,
+not a general scalability envelope. Matching report/analysis hashes were
+verified on CPython 3.11 and 3.14 on the same machine. Generated evidence remains
+external or ignored, not part of the source distribution.
+
+Matrix contrast resolution reuses its artifact-backed plan validation within
+one operation. Public validators still validate external artifacts; resolving
+and writing a newly generated contrast plan does not repeatedly reload the
+same artifacts. A call-count regression guards this boundary.
 These checks establish the implemented invariants on synthetic data; they are
 not a full-corpus model-performance result. See the
 [thesis evaluation audit](docs/thesis-evaluation-audit.md) for the distinction

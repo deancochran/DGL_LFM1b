@@ -3,6 +3,9 @@
 import argparse
 import json
 
+from lfm1b_protocol.canonical import canonical_json
+from research_data.hygiene import atomic_write_generated
+
 from .adapters import artifact_summary, case_from_artifact
 from .contrasts import (contrast_pair, create_contrast_analysis,
                         load_contrast_analysis, result_summaries,
@@ -12,8 +15,7 @@ from .matrix import (create_contrast_analysis_from_matrix_plan,
                      load_mask_matrix_spec, load_matrix_contrast_plan,
                      load_matrix_index, matrix_preview, prepare_mask_matrix,
                      resolve_matrix_contrast_plan, save_mask_matrix_spec,
-                     save_matrix_contrast_plan, save_matrix_index,
-                     validate_matrix_output_paths)
+                     save_matrix_index, validate_matrix_output_paths)
 from .plan import (ADAPTERS, CANDIDATE_POLICIES, MODELS, SPLITS, TARGETS,
                     create_plan, load_plan, save_plan)
 from .runner import load_report, run_plan, save_report
@@ -348,8 +350,11 @@ def main(argv=None):
                 spec, index, plan, report, args.expected_spec_hash,
                 args.expected_index_hash, args.expected_plan_hash,
                 args.expected_report_hash)
-            save_matrix_contrast_plan(
-                args.output, contrast_plan, spec, index, plan, report)
+            # Resolution above strictly validates every external input and
+            # validates the generated contrast plan.  Write that exact pinned
+            # value rather than reloading every matrix artifact solely to
+            # validate the same in-memory object again.
+            atomic_write_generated(args.output, canonical_json(contrast_plan))
             output = {"contrast_plan_hash": contrast_plan["contrast_plan_hash"],
                       "input_report_hash": contrast_plan["input_report_hash"],
                       "contrasts": len(contrast_plan["pairs"])}

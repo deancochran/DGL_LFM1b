@@ -186,6 +186,25 @@ class ProtocolMatrixTests(unittest.TestCase):
                 entry["artifact_identity"]["population_hash"]
                 for entry in index["entries"]}), 1)
 
+    def test_resolution_reuses_one_artifact_backed_plan_proof(self):
+        """A resolver must not revalidate every artifact for its own output."""
+        with tempfile.TemporaryDirectory() as directory:
+            spec = self.lfm_spec()
+            index = prepare_mask_matrix(spec, Path(directory) / "artifacts")
+            plan = create_matrix_comparison_plan(spec, index)
+            report = run_plan(plan)
+            original = __import__(
+                "protocol_comparison.matrix", fromlist=[
+                    "create_matrix_comparison_plan"]
+            ).create_matrix_comparison_plan
+            with mock.patch("protocol_comparison.matrix.create_matrix_comparison_plan",
+                            wraps=original) as rebuild:
+                resolved = resolve_matrix_contrast_plan(spec, index, plan, report)
+            self.assertEqual(rebuild.call_count, 1)
+            self.assertEqual(
+                resolved,
+                validate_matrix_contrast_plan(resolved, spec, index, plan, report))
+
     def test_matrix_limits_roots_and_tampering_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
