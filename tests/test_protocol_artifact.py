@@ -39,11 +39,16 @@ def rehash_config(artifact):
 
 
 class ProtocolArtifactTests(unittest.TestCase):
+    def prepare(self, rows, **kwargs):
+        kwargs.setdefault("split_strategy", "per_user_last_timestamp_groups")
+        return prepare_protocol_artifact(rows, **kwargs)
+
     def test_schema_hashes_targets_and_both_candidate_policies(self):
-        artifact = prepare_protocol_artifact(
+        artifact = self.prepare(
             events(), sampled_negatives=2, seed=7,
-            sources=({"bytes": 123, "sha256": "a" * 64},))
-        self.assertEqual(artifact["schema_version"], 1)
+            sources=({"source_kind": "listening_events", "parser_version": "lfm_listening_events_tsv_v1", "parsed_row_count": 18, "bytes": 123, "sha256": "a" * 64, "has_header": False,
+                      "column_order": ("user_id", "artist_id", "album_id", "track_id", "timestamp")},))
+        self.assertEqual(artifact["schema_version"], 2)
         self.assertEqual(set(artifact["targets"]), {"artist", "album", "track"})
         self.assertEqual(artifact["config"]["catalog_policy"], "train_observed")
         self.assertEqual(artifact["config"]["sampled_negatives"], 2)
@@ -66,22 +71,22 @@ class ProtocolArtifactTests(unittest.TestCase):
         cold_events = [Event(1, 10, 100, 1000, 1),
                        Event(1, 11, 101, 1001, 2),
                        Event(1, 12, 102, 1002, 3)]
-        warm = prepare_protocol_artifact(cold_events)
+        warm = self.prepare(cold_events)
         artist = warm["targets"]["artist"]
         self.assertEqual(artist["catalog"], (10,))
         self.assertEqual(artist["splits"]["validation"], ())
         stats = warm["statistics"]["targets"]["artist"]["cold_start_exclusions"]
         self.assertEqual(stats["validation"]["excluded_positive_pairs"], 1)
         self.assertEqual(stats["test"]["excluded_user_ids"], (1,))
-        transductive = prepare_protocol_artifact(
+        transductive = self.prepare(
             cold_events, catalog_policy="all_mapped")
         self.assertEqual(transductive["targets"]["artist"]["catalog"],
                          (10, 11, 12))
         self.assertTrue(transductive["config"]["catalog_uses_future_information"])
 
     def test_fixed_candidates_persist_and_are_order_deterministic(self):
-        first = prepare_protocol_artifact(events(), sampled_negatives=2, seed=9)
-        second = prepare_protocol_artifact(reversed(events()), sampled_negatives=2,
+        first = self.prepare(events(), sampled_negatives=2, seed=9)
+        second = self.prepare(reversed(events()), sampled_negatives=2,
                                            seed=9)
         self.assertEqual(first, second)
         with tempfile.TemporaryDirectory() as directory:
@@ -92,8 +97,8 @@ class ProtocolArtifactTests(unittest.TestCase):
                 json.loads(json.dumps(first["targets"]["track"]["candidates"])))
 
     def test_source_and_candidate_tampering_change_or_invalidate_identity(self):
-        first = prepare_protocol_artifact(events(), sources=({"sha256": "a" * 64},))
-        second = prepare_protocol_artifact(events(), sources=({"sha256": "b" * 64},))
+        first = self.prepare(events(), sources=({"source_kind": "listening_events", "parser_version": "lfm_listening_events_tsv_v1", "parsed_row_count": 18, "bytes": 1, "sha256": "a" * 64, "has_header": False, "column_order": ("user_id", "artist_id", "album_id", "track_id", "timestamp")},))
+        second = self.prepare(events(), sources=({"source_kind": "listening_events", "parser_version": "lfm_listening_events_tsv_v1", "parsed_row_count": 18, "bytes": 1, "sha256": "b" * 64, "has_header": False, "column_order": ("user_id", "artist_id", "album_id", "track_id", "timestamp")},))
         self.assertNotEqual(first["protocol_hash"], second["protocol_hash"])
         tampered = copy.deepcopy(first)
         row = tampered["targets"]["artist"]["candidates"]["test"][0]
@@ -104,16 +109,18 @@ class ProtocolArtifactTests(unittest.TestCase):
                 load_protocol_artifact(directory)
 
     def test_source_path_is_not_identity(self):
-        first = prepare_protocol_artifact(
-            events(), sources=({"path": "/one/events.dat", "bytes": 7,
-                                "sha256": "a" * 64},))
-        second = prepare_protocol_artifact(
-            events(), sources=({"path": "/two/events.dat", "bytes": 7,
-                                "sha256": "a" * 64},))
+        first = self.prepare(
+            events(), sources=({"path": "/one/events.dat", "source_kind": "listening_events", "parser_version": "lfm_listening_events_tsv_v1", "parsed_row_count": 18, "bytes": 7,
+                                "sha256": "a" * 64, "has_header": False,
+                                "column_order": ("user_id", "artist_id", "album_id", "track_id", "timestamp")},))
+        second = self.prepare(
+            events(), sources=({"path": "/two/events.dat", "source_kind": "listening_events", "parser_version": "lfm_listening_events_tsv_v1", "parsed_row_count": 18, "bytes": 7,
+                                "sha256": "a" * 64, "has_header": False,
+                                "column_order": ("user_id", "artist_id", "album_id", "track_id", "timestamp")},))
         self.assertEqual(first["protocol_hash"], second["protocol_hash"])
 
     def test_semantic_tampering_is_rejected_after_rehash(self):
-        artifact = prepare_protocol_artifact(events(), sampled_negatives=2)
+        artifact = self.prepare(events(), sampled_negatives=2)
         bad_count = copy.deepcopy(artifact)
         bad_count["targets"]["artist"]["splits"]["train"][0]["play_count"] = 0
         rehash(bad_count)
@@ -136,7 +143,7 @@ class ProtocolArtifactTests(unittest.TestCase):
     def test_global_timestamp_config_and_statistics_tampering_is_rejected(self):
         spaced = [Event(row.user_id, row.artist_id, row.album_id, row.track_id,
                         row.timestamp * 10) for row in events()]
-        artifact = prepare_protocol_artifact(spaced, sampled_negatives=2)
+        artifact = self.prepare(spaced, sampled_negatives=2)
         boundary = copy.deepcopy(artifact)
         row = boundary["targets"]["album"]["splits"]["validation"][0]
         row["first_timestamp"] += 1
@@ -161,7 +168,7 @@ class ProtocolArtifactTests(unittest.TestCase):
             validate_protocol_artifact(statistics)
 
     def test_graph_input_covers_known_ids_with_contiguous_mappings(self):
-        artifact = prepare_protocol_artifact(events(), sampled_negatives=2)
+        artifact = self.prepare(events(), sampled_negatives=2)
         graph = graph_input_from_protocol(artifact)
         self.assertEqual(graph["static_edges"], [])
         for node_type, mapping in graph["node_mappings"].items():
@@ -178,12 +185,12 @@ class ProtocolArtifactTests(unittest.TestCase):
             Event(2, 12, 102, 1002, 2), Event(2, 10, 100, 1000, 3),
             Event(9, 99, 199, 1999, 1), Event(9, 98, 198, 1998, 2),
         ]
-        warm = graph_input_from_protocol(prepare_protocol_artifact(rows))
+        warm = graph_input_from_protocol(self.prepare(rows))
         self.assertEqual(set(warm["node_mappings"]["user"]), {"1", "2"})
         self.assertEqual(set(warm["node_mappings"]["artist"]), {"10", "11"})
         self.assertNotIn("12", warm["node_mappings"]["artist"])
         self.assertNotIn("99", warm["node_mappings"]["artist"])
-        transductive = graph_input_from_protocol(prepare_protocol_artifact(
+        transductive = graph_input_from_protocol(self.prepare(
             rows, catalog_policy="all_mapped"))
         self.assertIn("9", transductive["node_mappings"]["user"])
         self.assertIn("12", transductive["node_mappings"]["artist"])
@@ -195,7 +202,7 @@ class ProtocolArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             prepare = subprocess.run(
                 [sys.executable, "-m", "lfm1b_protocol.cli", "prepare", fixture,
-                 directory, "--sampled-negatives", "2", "--seed", "11"],
+                 directory, "--split-strategy", "per_user_last_timestamp_groups", "--sampled-negatives", "2", "--seed", "11"],
                 cwd=root, check=True, capture_output=True, text=True)
             self.assertIn("protocol_hash", json.loads(prepare.stdout))
             verify = subprocess.run(
@@ -228,6 +235,7 @@ class ProtocolArtifactTests(unittest.TestCase):
             with open(graph_path, "r") as source:
                 graph = json.load(source)
             self.assertEqual(graph["static_edges"], [])
+            self.assertIn("train_interaction_edges", graph)
 
 
 if __name__ == "__main__":

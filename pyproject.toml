@@ -5,11 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lfm1b-protocol"
 version = "0.1.0"
-description = "Dependency-free leakage-free evaluation protocol for LFM-1b"
+description = "Dependency-free temporal evaluation and bounded comparison for LFM-1b and ListenBrainz"
 requires-python = ">=3.8"
 
 [project.scripts]
 lfm1b-protocol = "lfm1b_protocol.cli:main"
+listenbrainz-protocol = "listenbrainz_protocol.cli:main"
+research-data = "research_data.cli:main"
+protocol-compare = "protocol_comparison.cli:main"
 
 [tool.setuptools]
-packages = ["lfm1b_protocol"]
+include-package-data = false
+packages = ["lfm1b_protocol", "listenbrainz_protocol", "research_data", "protocol_comparison"]

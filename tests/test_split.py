@@ -18,8 +18,8 @@ class SplitTests(unittest.TestCase):
             Event(1, 11, 103, 1003, 3, 5),
             Event(1, 13, 101, 1004, 3, 6),
         ]
-        result = temporal_split(events)
-        reversed_result = temporal_split(reversed(events))
+        result = temporal_split(events, strategy="per_user_last_timestamp_groups")
+        reversed_result = temporal_split(reversed(events), strategy="per_user_last_timestamp_groups")
         self.assertEqual(result, reversed_result)
         train_artist = next(row for row in result.split.train
                             if row.item_type == "artist")
@@ -43,7 +43,7 @@ class SplitTests(unittest.TestCase):
 
     def test_insufficient_history_still_contributes_known_and_catalog(self):
         result = temporal_split([Event(9, 7, None, None, 1),
-                                 Event(9, 8, None, None, 2)])
+                                  Event(9, 8, None, None, 2)], strategy="per_user_last_timestamp_groups")
         self.assertEqual(result.statistics.insufficient_users, (9,))
         self.assertEqual(result.split.train, ())
         self.assertEqual(result.catalogs["artist"], (7, 8))

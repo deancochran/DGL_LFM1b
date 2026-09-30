@@ -1,6 +1,7 @@
 import unittest
+from unittest import mock
 
-from lfm1b_protocol.candidates import build_candidates, candidate_digest
+from lfm1b_protocol.candidates import _priority, build_candidates, candidate_digest
 
 
 class CandidateTests(unittest.TestCase):
@@ -34,6 +35,33 @@ class CandidateTests(unittest.TestCase):
             known_positive_index={1: {1, 2, 3, 4}},
             sorted_catalog=catalog, catalog_index=set(catalog))
         self.assertEqual(ordinary, indexed)
+
+    def test_zero_negative_sample_does_not_compute_priorities(self):
+        with mock.patch("lfm1b_protocol.candidates._priority",
+                        side_effect=AssertionError("priority should not be computed")):
+            result = build_candidates(
+                1, "artist", "validation", (2,), range(100), (),
+                "fixed_sampled", negatives=0, seed=31)
+        self.assertEqual(result.items, (2,))
+
+    def test_bounded_sampler_matches_sorted_priority_definition(self):
+        catalog = tuple(range(20))
+        positives = (7,)
+        for seed in (0, 1, 31):
+            for excluded_items in ((), (1, 2), tuple(range(0, 15, 2))):
+                exclusions = tuple((1, item) for item in excluded_items)
+                blocked = set(excluded_items).union(positives)
+                eligible = [item for item in catalog if item not in blocked]
+                for negatives in (0, 1, 5, 100):
+                    count = min(negatives, len(eligible))
+                    selected = [item for unused_priority, item in sorted(
+                        (_priority(seed, 1, "artist", "test", item), item)
+                        for item in eligible)[:count]]
+                    expected = tuple(sorted(set(positives).union(selected)))
+                    actual = build_candidates(
+                        1, "artist", "test", positives, catalog, exclusions,
+                        "fixed_sampled", negatives=negatives, seed=seed)
+                    self.assertEqual(actual.items, expected)
 
 
 if __name__ == "__main__":

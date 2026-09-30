@@ -3,10 +3,16 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
+*.pyd
 *$py.class
+*.class
 
 # C extensions
 *.so
+*.dll
+*.dylib
 
 # idea
 .idea/
@@ -106,15 +112,49 @@ ENV/
 .mypy_cache/
 
 # data
-data/*
+/data/
+/datasets/
+/artifacts/
+/outputs/
+/runs/
+/checkpoints/
 .vscode/
 *.pkl
 *.txt
 *.csv
 *.h5
+*.hdf5
 *.json
 *.npy
+*.npz
 *.png
 *.mat
 *.pt
+*.pth
+*.ckpt
+*.bin
+*.dat
+*.listens
+*.parquet
+*.feather
+*.arrow
+*.sqlite
+*.sqlite3
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+*.bz2
+*.xz
+*.zst
+*.tgz
+*.tbz2
+*.txz
+*.zip
+*.7z
+*.whl
 
+# Tiny synthetic fixtures are source-controlled test inputs, not downloaded data.
+!examples/tiny_events.dat
+!examples/listenbrainz_synthetic.listens

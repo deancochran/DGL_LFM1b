@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import json
 import os
 from collections import Counter, defaultdict
@@ -8,34 +7,16 @@ from typing import Dict, Sequence
 from .artifacts import (ArtifactIntegrityError, candidate_rows_for_policy,
                         load_protocol_artifact, prepare_protocol_artifact,
                         save_graph_input, save_protocol_artifact)
-from .io import LFM_LISTENING_EVENT_COLUMNS, read_listening_events
+from .io import read_listening_events_with_provenance
 from .metrics import evaluate_rankings
 
 
-def _source_provenance(path: str, has_header: bool) -> Dict[str, object]:
-    digest = hashlib.sha256()
-    size = 0
-    with open(path, "rb") as source:
-        while True:
-            chunk = source.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-            size += len(chunk)
-    return {
-        "bytes": size,
-        "column_order": LFM_LISTENING_EVENT_COLUMNS,
-        "has_header": has_header,
-        "path": os.path.abspath(path),
-        "sha256": digest.hexdigest(),
-    }
-
-
 def _prepare(args: argparse.Namespace) -> int:
-    provenance = _source_provenance(args.input, args.header)
     protocol = prepare_protocol_artifact(
-        read_listening_events(args.input, args.header), args.sampled_negatives,
-        args.seed, args.catalog_policy, sources=(provenance,))
+        read_listening_events_with_provenance(args.input, args.header), args.sampled_negatives,
+        args.seed, args.catalog_policy, split_strategy=args.split_strategy,
+        validation_cutoff=args.validation_cutoff, test_cutoff=args.test_cutoff,
+        repeat_policy=args.repeat_policy, positive_filter_horizon=args.positive_filter_horizon)
     save_protocol_artifact(args.output, protocol)
     print(json.dumps({"config_hash": protocol["config_hash"],
                       "protocol_hash": protocol["protocol_hash"]}, sort_keys=True))
@@ -74,7 +55,8 @@ def _baseline(args: argparse.Namespace) -> int:
     for row in candidate_rows:
         scores[row["user_id"]] = [
             (item, float(popularity[item])) for item in row["candidate_item_ids"]]
-    result = evaluate_rankings(scores, positives, args.k, catalog, popularity)
+    expected = {row["user_id"]: tuple(row["candidate_item_ids"]) for row in candidate_rows}
+    result = evaluate_rankings(scores, positives, expected, args.k, catalog, popularity)
     output = dict(result.__dict__)
     output.update({"item_type": args.item_type, "policy": args.policy,
                    "protocol_hash": protocol["protocol_hash"],
@@ -94,7 +76,13 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--seed", type=int, default=0)
     prepare.add_argument("--catalog-policy",
                          choices=("train_observed", "all_mapped"),
-                         default="train_observed")
+                          default="train_observed")
+    prepare.add_argument("--split-strategy", required=True,
+                         choices=("per_user_last_timestamp_groups", "global_time_cutoffs"))
+    prepare.add_argument("--validation-cutoff", type=int)
+    prepare.add_argument("--test-cutoff", type=int)
+    prepare.add_argument("--repeat-policy", choices=("novel_only", "repeat_allowed"), default="novel_only")
+    prepare.add_argument("--positive-filter-horizon", choices=("as_of_split", "all_observed"), default="as_of_split")
     prepare.set_defaults(action=_prepare)
     verify = subparsers.add_parser("verify", help="verify bundle integrity")
     verify.add_argument("artifact", help="bundle directory")
